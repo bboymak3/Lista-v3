@@ -1,0 +1,14 @@
+name = "lista"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = ".vercel/output/static"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "lista-db"
+database_id = "25b87c1b-c6fd-4dfc-8858-5a25388723a6"
+
+# R2 Bucket para fotos
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "my-emdash-media"
