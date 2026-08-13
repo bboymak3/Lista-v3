@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+
 import { db } from '@/lib/db'
 import { getUserFromRequest } from '@/lib/auth'
 import { sendPushNotification } from '@/lib/push'

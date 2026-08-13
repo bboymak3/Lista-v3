@@ -1,7 +1,6 @@
 import webpush from 'web-push'
 import { db } from '@/lib/db'
 
-// Configurar VAPID una sola vez
 let vapidConfigured = false
 
 function configureVapid() {
@@ -21,39 +20,28 @@ export async function sendPushNotification(
   payload: { title: string; body: string; tipo?: string; url?: string }
 ) {
   configureVapid()
-
   try {
-    const subscriptions = await db.pushSubscription.findMany({
-      where: { userId },
-    })
-
+    const subscriptions = await db.pushSubscription.findMany({ where: { userId } })
     if (subscriptions.length === 0) return
 
     const payloadString = JSON.stringify(payload)
-
-    const results = await Promise.allSettled(
+    await Promise.allSettled(
       subscriptions.map(async (sub) => {
         try {
           await webpush.sendNotification(
             {
               endpoint: sub.endpoint,
-              keys: {
-                p256dh: sub.p256dhKey,
-                auth: sub.authKey,
-              },
+              keys: { p256dh: sub.p256dhKey, auth: sub.authKey },
             },
             payloadString
           )
         } catch (error: any) {
-          // Si el endpoint ya no es válido (410 Gone), eliminar la suscripción
           if (error.statusCode === 410 || error.statusCode === 404) {
             await db.pushSubscription.delete({ where: { id: sub.id } })
           }
         }
       })
     )
-
-    return results
   } catch (error) {
     console.error('Push notification error:', error)
   }
