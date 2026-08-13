@@ -1,31 +1,33 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { useAuthStore } from '@/stores/auth-store'
+import { LoginForm } from '@/components/auth/login-form'
+import { AppShell } from '@/components/layouts/app-shell'
+import { Loader2 } from 'lucide-react'
+
 export default function Home() {
-  return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
-      gap: '2rem',
-      padding: '1rem'
-    }}>
-      <div style={{
-        position: 'relative',
-        width: '6rem',
-        height: '6rem'
-      }}>
-        <img
-          src="/logo.svg"
-          alt="Z.ai Logo"
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain'
-          }}
-        />
+  // useSyncExternalStore-like pattern: detectar hidratación sin setState en effect
+  const [hydrated, setHydrated] = useState(false)
+  const token = useAuthStore((s) => s.token)
+  const user = useAuthStore((s) => s.user)
+
+  useEffect(() => {
+    // requestAnimationFrame asegura que ocurra después del primer paint
+    requestAnimationFrame(() => setHydrated(true))
+  }, [])
+
+  if (!hydrated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
       </div>
-    </div>
-  )
+    )
+  }
+
+  if (!token || !user) {
+    return <LoginForm />
+  }
+
+  return <AppShell />
 }

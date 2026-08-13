@@ -1,8 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// Prisma schema — Sistema de Asistencia Escolar (Lista v3)
+// Compatible con SQLite (dev) y Cloudflare D1 (prod)
 
 generator client {
   provider = "prisma-client-js"
@@ -13,20 +10,262 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================
+// USUARIOS Y ROLES
+// ============================================
+
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  cedula     String   @unique
+  nombre     String
+  apellido   String
+  email      String?  @unique
+  password   String   // bcrypt hash
+  rol        String   // admin | profesor | representante | alumno
+  telefono   String?
+  fotoKey    String?  // R2 object key
+  activo     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  studentProfile        Student?             @relation("StudentUser")
+  tutorSections         Section[]            @relation("SectionTutor")
+  sectionAssignments    SectionAssignment[]
+  professorCheckins     ProfessorCheckin[]
+  feedPosts             FeedPost[]
+  parentLinks           ParentStudent[]
+  notificationsReceived Notification[]
+  pushSubscriptions     PushSubscription[]
+  attendanceMarked      Attendance[]         @relation("AttendanceMarker")
+
+  @@index([rol, activo])
 }
 
-model Post {
+// ============================================
+// PLANTELES (colegios) + GEOCERCA
+// ============================================
+
+model Plantel {
+  id            String  @id @default(cuid())
+  nombre        String
+  direccion     String?
+  lat           Float
+  lng           Float
+  radioM        Int     @default(150)
+  poligonoJson  String? // GeoJSON polygon string (geocerca compleja opcional)
+  periodoActual String  @default("2024-2025")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sections Section[]
+
+  @@index([nombre])
+}
+
+// ============================================
+// SECCIONES (grados/grupos)
+// ============================================
+
+model Section {
+  id             String   @id @default(cuid())
+  nombre         String   // "1° A", "2° B"
+  grado          String   // "1", "2", "3", "4", "5"
+  turno          String   // manana | tarde | nocturno
+  plantelId      String
+  plantel        Plantel  @relation(fields: [plantelId], references: [id])
+  tutorId        String?  // profesor tutor principal
+  tutor          User?    @relation("SectionTutor", fields: [tutorId], references: [id])
+  periodoEscolar String   @default("2024-2025")
+  activa         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  students           Student[]
+  assignments        SectionAssignment[]
+  feedPosts          FeedPost[]
+  attendanceSessions AttendanceSession[]
+
+  @@index([plantelId, activa])
+  @@index([grado, turno])
+}
+
+model SectionAssignment {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  sectionId String
+  section   Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  userId    String   // profesor asignado a la sección
+  user      User     @relation(fields: [userId], references: [id])
+  role      String   @default("profesor") // tutor | profesor
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+
+  @@unique([sectionId, userId])
+  @@index([userId])
+}
+
+// ============================================
+// ESTUDIANTES
+// ============================================
+
+model Student {
+  id              String   @id @default(cuid())
+  codigoUnico     String   @unique
+  cedulaEscolar   String?  @unique
+  nombre          String
+  apellido        String
+  fechaNacimiento String?
+  genero          String?  // M | F | O
+  sectionId       String
+  section         Section  @relation(fields: [sectionId], references: [id])
+  userId          String?  @unique // link a User si el alumno tiene login
+  user            User?    @relation("StudentUser", fields: [userId], references: [id])
+  fotoKey         String?
+  qrCode          String   @unique
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  parents            ParentStudent[]
+  attendance         Attendance[]
+  locationPings      LocationPing[]
+
+  @@index([sectionId, activo])
+  @@index([nombre, apellido])
+}
+
+model ParentStudent {
+  id              String  @id @default(cuid())
+  representanteId String
+  representante   User    @relation(fields: [representanteId], references: [id])
+  estudianteId    String
+  estudiante      Student @relation(fields: [estudianteId], references: [id], onDelete: Cascade)
+  parentesco      String  // madre | padre | tutor | otro
+  esPrincipal     Boolean @default(false)
+  createdAt       DateTime @default(now())
+
+  @@unique([representanteId, estudianteId])
+  @@index([estudianteId])
+}
+
+// ============================================
+// ASISTENCIA
+// ============================================
+
+model AttendanceSession {
+  id         String   @id @default(cuid())
+  sectionId  String
+  section    Section  @relation(fields: [sectionId], references: [id])
+  profesorId String
+  fecha      DateTime @default(now())
+  estado     String   @default("activa") // activa | cerrada | cancelada
+  createdAt  DateTime @default(now())
+
+  attendance Attendance[]
+
+  @@index([sectionId, fecha])
+  @@index([estado])
+}
+
+model Attendance {
+  id            String              @id @default(cuid())
+  estudianteId  String
+  estudiante    Student             @relation(fields: [estudianteId], references: [id])
+  sessionId     String?
+  session       AttendanceSession?  @relation(fields: [sessionId], references: [id])
+  estado        String              // presente | ausente | tardanza | justificado
+  origen        String              @default("manual") // manual | gps_auto | qr | profesor
+  lat           Float?
+  lng           Float?
+  marcadoPor    String
+  marcadoPorUser User               @relation("AttendanceMarker", fields: [marcadoPor], references: [id])
+  observacion   String?
+  fecha         DateTime            @default(now())
+
+  @@unique([estudianteId, sessionId])
+  @@index([estudianteId, fecha])
+}
+
+// ============================================
+// CHECK-IN GPS DEL PROFESOR
+// ============================================
+
+model ProfessorCheckin {
+  id         String   @id @default(cuid())
+  profesorId String
+  profesor   User     @relation(fields: [profesorId], references: [id])
+  tipo       String   // entrada | salida
+  lat        Float?
+  lng        Float?
+  timestamp  DateTime @default(now())
+
+  @@index([profesorId, timestamp])
+}
+
+// ============================================
+// FEED SOCIAL (noticias/fotos de profesores)
+// ============================================
+
+model FeedPost {
+  id         String   @id @default(cuid())
+  profesorId String
+  profesor   User     @relation(fields: [profesorId], references: [id])
+  sectionId  String
+  section    Section  @relation(fields: [sectionId], references: [id])
+  tipo       String   // texto | foto | aviso
+  contenido  String
+  mediaKey   String?  // R2 key para foto
+  createdAt  DateTime @default(now())
+
+  @@index([sectionId, createdAt])
+  @@index([profesorId, createdAt])
+}
+
+// ============================================
+// NOTIFICACIONES
+// ============================================
+
+model Notification {
+  id             String   @id @default(cuid())
+  destinatarioId String
+  destinatario   User     @relation(fields: [destinatarioId], references: [id])
+  tipo           String   // ausencia | tardanza | salida_plantel | feed | checkin | general
+  titulo         String
+  mensaje        String
+  leida          Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([destinatarioId, leida])
+  @@index([createdAt])
+}
+
+// ============================================
+// PUSH SUBSCRIPTIONS (Web Push Android)
+// ============================================
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  endpoint  String
+  p256dhKey String
+  authKey   String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ============================================
+// TRACKING GPS EN VIVO (long polling)
+// ============================================
+
+model LocationPing {
+  id           String   @id @default(cuid())
+  estudianteId String
+  estudiante   Student  @relation(fields: [estudianteId], references: [id])
+  lat          Float
+  lng          Float
+  precision    Float?   // metros
+  timestamp    DateTime @default(now())
+
+  @@index([estudianteId, timestamp])
 }
