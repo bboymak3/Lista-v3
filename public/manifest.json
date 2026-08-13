@@ -1,7 +1,7 @@
 {
   "name": "Lista — Sistema de Asistencia Escolar",
   "short_name": "Lista",
-  "description": "Control de asistencia, rastreo GPS y notificaciones escolares",
+  "description": "Control de asistencia y notificaciones escolares",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0d9488",

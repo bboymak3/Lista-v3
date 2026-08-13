@@ -10,7 +10,7 @@ const geistSans = Geist({
 
 export const metadata: Metadata = {
   title: "Lista — Sistema de Asistencia Escolar",
-  description: "Control de asistencia, rastreo GPS y notificaciones para instituciones educativas",
+  description: "Control de asistencia y notificaciones para instituciones educativas",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

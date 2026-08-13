@@ -63,7 +63,7 @@ export function LoginForm() {
                 Lista
               </CardTitle>
               <CardDescription className="text-base">
-                Sistema de Asistencia y Rastreo Escolar
+                Sistema de Asistencia Escolar
               </CardDescription>
             </div>
           </CardHeader>
