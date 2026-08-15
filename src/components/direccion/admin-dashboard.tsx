@@ -16,19 +16,7 @@ import {
   ClipboardCheck,
   TrendingUp,
 } from 'lucide-react'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from '@/components/ui/chart'
+// Chart component simplificado (SVG nativo, sin recharts para reducir bundle)
 import { formatDistanceToNow } from 'date-fns'
 import { es } from 'date-fns/locale'
 
@@ -61,20 +49,49 @@ interface DashboardStats {
   }>
 }
 
-const chartConfig = {
-  presente: {
-    label: 'Presentes',
-    color: '#10b981',
-  },
-  ausente: {
-    label: 'Ausentes',
-    color: '#ef4444',
-  },
-  tardanza: {
-    label: 'Tardanzas',
-    color: '#f59e0b',
-  },
-} satisfies ChartConfig
+const chartColors = {
+  presente: '#10b981',
+  ausente: '#ef4444',
+  tardanza: '#f59e0b',
+}
+
+// Chart SVG nativo (sin dependencias externas)
+function SimpleBarChart({ data }: { data: DashboardStats['attendanceBySection'] }) {
+  if (!data || data.length === 0) return null
+  const maxVal = Math.max(...data.flatMap(d => [d.presente, d.ausente, d.tardanza]), 1)
+  const barWidth = 24
+  const gap = 8
+  const groupWidth = barWidth * 3 + gap * 2
+  const chartWidth = data.length * (groupWidth + gap * 2)
+  const chartHeight = 200
+  const heightScale = (val: number) => (val / maxVal) * (chartHeight - 30)
+
+  return (
+    <div className="overflow-x-auto">
+      <svg width={Math.max(chartWidth, 300)} height={chartHeight + 30} className="w-full">
+        {[0, 0.25, 0.5, 0.75, 1].map((p, i) => (
+          <line key={i} x1={0} y1={chartHeight - p * (chartHeight - 30)} x2={Math.max(chartWidth, 300)} y2={chartHeight - p * (chartHeight - 30)} stroke="#e5e7eb" strokeWidth={1} strokeDasharray="3 3" />
+        ))}
+        {data.map((d, i) => {
+          const x0 = i * (groupWidth + gap * 2) + gap
+          return (
+            <g key={i}>
+              <rect x={x0} y={chartHeight - heightScale(d.presente)} width={barWidth} height={heightScale(d.presente)} fill={chartColors.presente} rx={3} />
+              <rect x={x0 + barWidth + gap} y={chartHeight - heightScale(d.ausente)} width={barWidth} height={heightScale(d.ausente)} fill={chartColors.ausente} rx={3} />
+              <rect x={x0 + (barWidth + gap) * 2} y={chartHeight - heightScale(d.tardanza)} width={barWidth} height={heightScale(d.tardanza)} fill={chartColors.tardanza} rx={3} />
+              <text x={x0 + groupWidth / 2} y={chartHeight + 18} textAnchor="middle" className="fill-muted-foreground" fontSize="11">{d.section}</text>
+            </g>
+          )
+        })}
+      </svg>
+      <div className="flex gap-4 mt-2 text-xs">
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ background: chartColors.presente }} /> Presentes</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ background: chartColors.ausente }} /> Ausentes</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded" style={{ background: chartColors.tardanza }} /> Tardanzas</span>
+      </div>
+    </div>
+  )
+}
 
 function StatCard({
   title,
@@ -233,22 +250,9 @@ export function AdminDashboard() {
           </CardHeader>
           <CardContent>
             {hasChart ? (
-              <ChartContainer config={chartConfig} className="h-72 w-full">
-                <BarChart data={data.attendanceBySection}>
-                  <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="section"
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                  />
-                  <YAxis tickLine={false} axisLine={false} allowDecimals={false} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Bar dataKey="presente" fill="var(--color-presente)" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="ausente" fill="var(--color-ausente)" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="tardanza" fill="var(--color-tardanza)" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ChartContainer>
+              <div className="h-72 w-full">
+                <SimpleBarChart data={data.attendanceBySection} />
+              </div>
             ) : (
               <div className="h-72 flex items-center justify-center text-muted-foreground text-sm">
                 Sin registros de asistencia en los últimos 7 días
