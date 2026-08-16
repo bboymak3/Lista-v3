@@ -23,6 +23,7 @@ model User {
   password   String   // bcrypt hash
   rol        String   // admin | profesor | representante | alumno
   telefono   String?
+  whatsapp   String?  // número de WhatsApp (formato internacional sin +)
   fotoKey    String?  // R2 object key
   activo     Boolean  @default(true)
   createdAt  DateTime @default(now())

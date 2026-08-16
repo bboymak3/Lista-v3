@@ -290,3 +290,46 @@ Stage Summary:
 - Lint source limpio; todos los errores reportados son artefactos de build en `.open-next/` (auto-generados por @opennextjs/cloudflare, no código fuente).
 - Dev server corre sin errores de compilación; rutas responden 200 en peticiones GET /.
 - Work pendiente: commitear los cambios (actualmente 27 modified + 1 untracked en src/app/api/).
+
+---
+Task ID: FEED-ENHANCE
+Agent: full-stack-developer (Feed enhancements)
+Task: Fix photo display + camera capture + PDF support + send target
+
+Work Log:
+- src/components/profesor/feed-poster.tsx — added 'pdf' tipo, camera capture (capture="environment"), PDF upload (accept=".pdf"), send target selector (representantes|alumnos|ambos), rose-themed PDF preview card, dynamic file input attrs, 15MB max, renamed photo state to media state, posts list shows "Para: {dest}" footer, sends destinatarios field in API body.
+- src/components/representante/representante-feed.tsx — added fileUrl() helper, isPdf() helper, PDF card display with "Ver PDF" link to /api/files/{mediaKey}, fixed <img src> to use fileUrl(), added 'pdf' tipoMeta entry (rose theme).
+- src/components/alumno/alumno-feed.tsx — same as representante: fileUrl() + isPdf() helpers, PDF card with Ver PDF button, fixed <img src> to use fileUrl(), added 'pdf' tipoConfig entry.
+- Initial attempt used lucide-react's FilePdf icon which doesn't exist in installed version; replaced with FileType across all 3 files.
+
+Stage Summary:
+- Photos now display correctly in production by routing media through /api/files/{key} (R2-backed) instead of bare paths.
+- Mobile users can capture photos directly via the camera with capture="environment".
+- PDF upload (up to 15MB) supported end-to-end with rose-themed preview cards.
+- Professors can choose recipients: representantes / alumnos / ambos. The destinatarios field is sent to /api/profesor/feed; the API route itself was NOT modified (per task rules), so it silently ignores the field until the API is updated separately.
+- Lint passes clean (no errors/warnings). Dev server returns 200 on /.
+
+---
+Task ID: PROFILES-WHATSAPP
+Agent: full-stack-developer (Profiles + WhatsApp)
+Task: Student profile with rep info + WhatsApp, rep edit WhatsApp, student photo, admin PDF send
+
+Work Log:
+- src/app/api/auth/me/route.ts — añadido `whatsapp` al SELECT D1 y select Prisma (Feature 5).
+- src/app/api/alumno/profile/route.ts — GET actualizado: rama D1 hace 2do query v3_parent_student JOIN v3_users para representantes; rama Prisma usa include parents.representante. Devuelve representantes[] + fotoKey (Feature 1).
+- src/components/alumno/carnet-digital.tsx — nueva sección "Representante" con nombre, parentesco, teléfono, WhatsApp y botón verde wa.me/{digits} en nueva tab. Avatar del carnet con botón cámara para subir foto. Card "Foto de perfil" con Upload. AvatarImage carga /api/files/{fotoKey} si existe (Features 1 + 3 UI).
+- src/app/api/representante/profile/route.ts (NUEVO) — GET devuelve perfil (cedula, nombre, apellido, email, telefono, whatsapp). PUT normaliza whatsapp a dígitos (sin +), valida 8-15 dígitos, UPDATE dinámico D1 o Prisma (Feature 2 API).
+- src/components/representante/representante-profile.tsx (NUEVO) — card de perfil con gradient emerald, formulario con validación en vivo, link de prueba wa.me/, explicación de uso (Feature 2 UI).
+- src/app/api/alumno/photo/route.ts (NUEVO) — POST FormData {file, estudianteId}. Valida imagen + max 5MB + ownership (alumno/admin). Sube a R2 prod / fs dev con sharp 512x512 cover. UPDATE v3_students.fotoKey (Feature 3 API).
+- src/app/api/admin/send-pdf/route.ts (NUEVO) — POST FormData {file PDF, sectionId, contenido, destinatarios}. Crea FeedPost tipo='pdf' + Notifications feed a representantes principales y/o alumnos (Feature 4 API).
+- src/components/direccion/send-pdf.tsx (NUEVO) — selector de sección, toggle destinatarios (3 botones), input PDF con preview, textarea, summary lateral, estado de éxito (Feature 4 UI).
+- src/components/layouts/app-shell.tsx — añadidos imports SendPdf + RepresentanteProfile + FileText icon. Nav item admin "Enviar PDF" (view admin-send-pdf). Nav item representante "Mi Perfil" (view representante-profile). Cases en ViewRenderer.
+- src/lib/db-compat.ts — FIXES pre-existentes: añadido include en destructure de findUnique/findFirst (antes se perdía en dev Prisma); añadido createMany method (faltaba y rompía profesor/feed + profesor/attendance en dev). Cambio mínimo, rama D1 intacta.
+
+Stage Summary:
+- 4 archivos API creados (representante/profile GET+PUT, alumno/photo POST, admin/send-pdf POST).
+- 2 archivos API modificados (auth/me +whatsapp, alumno/profile +representantes +fotoKey).
+- 3 componentes creados/modificados (representante-profile.tsx, send-pdf.tsx, carnet-digital.tsx).
+- 1 lib compartido fixeado (db-compat.ts).
+- Curl smoke tests: auth/me 200 with whatsapp; alumno/profile 200 with representantes[]; representante/profile GET+PUT 200 con validación 400; alumno/photo POST 200 + file sirve via /api/files; admin/send-pdf POST 200 crea FeedPost pdf + notifications; 403/400 en casos no autorizados/inválidos.
+- Lint: `bun run lint` exit code 0 — limpio.

@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
        WHERE p.sectionId IN (${placeholders})
        ORDER BY p.createdAt DESC
        LIMIT 50`,
-      [...sectionIds, ...sectionIds]
+      sectionIds
     )
 
     const result = posts.map((p) => ({

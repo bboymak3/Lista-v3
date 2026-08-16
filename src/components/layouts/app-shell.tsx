@@ -28,6 +28,7 @@ import {
   Newspaper,
   Settings,
   UserCircle,
+  FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -45,6 +46,7 @@ import { StudentsManager } from '@/components/direccion/students-manager'
 import { SectionsManager } from '@/components/direccion/sections-manager'
 import { PlantelConfig } from '@/components/direccion/plantel-config'
 import { UsersManager } from '@/components/direccion/users-manager'
+import { SendPdf } from '@/components/direccion/send-pdf'
 
 // Representante views
 import { RepresentanteDashboard } from '@/components/representante/representante-dashboard'
@@ -52,6 +54,7 @@ import { ChildLocationMap } from '@/components/representante/child-location-map'
 import { ChildAttendance } from '@/components/representante/child-attendance'
 import { RepresentanteFeed } from '@/components/representante/representante-feed'
 import { RepresentanteNotifications } from '@/components/representante/representante-notifications'
+import { RepresentanteProfile } from '@/components/representante/representante-profile'
 
 // Alumno views
 import { AlumnoDashboard } from '@/components/alumno/alumno-dashboard'
@@ -73,6 +76,7 @@ const navByRole: Record<Role, NavItem[]> = {
     { id: 'sections', label: 'Secciones', icon: School, view: 'admin-sections' },
     { id: 'professors', label: 'Profesores', icon: Users, view: 'admin-professors' },
     { id: 'plantel', label: 'Geocerca', icon: MapPin, view: 'admin-plantel' },
+    { id: 'send-pdf', label: 'Enviar PDF', icon: FileText, view: 'admin-send-pdf' },
     { id: 'users', label: 'Usuarios', icon: UserCircle, view: 'admin-users' },
   ],
   profesor: [
@@ -88,6 +92,7 @@ const navByRole: Record<Role, NavItem[]> = {
     { id: 'attendance', label: 'Asistencia', icon: ClipboardCheck, view: 'representante-attendance' },
     { id: 'feed', label: 'Noticias', icon: Newspaper, view: 'representante-feed' },
     { id: 'notifications', label: 'Avisos', icon: Bell, view: 'representante-notifications' },
+    { id: 'profile', label: 'Mi Perfil', icon: Settings, view: 'representante-profile' },
   ],
   alumno: [
     { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, view: 'alumno-dashboard' },
@@ -321,6 +326,8 @@ function ViewRenderer({ view }: { view: string }) {
         return <UsersManager defaultRole="profesor" />
       case 'admin-plantel':
         return <PlantelConfig />
+      case 'admin-send-pdf':
+        return <SendPdf />
       case 'admin-users':
         return <UsersManager />
       default:
@@ -359,6 +366,8 @@ function ViewRenderer({ view }: { view: string }) {
         return <RepresentanteFeed />
       case 'representante-notifications':
         return <RepresentanteNotifications />
+      case 'representante-profile':
+        return <RepresentanteProfile />
       default:
         return <RepresentanteDashboard />
     }

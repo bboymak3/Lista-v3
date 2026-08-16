@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { api } from '@/lib/api-client'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from 'sonner'
@@ -15,13 +16,14 @@ import {
   Clock,
   RefreshCw,
   ImageIcon,
+  FileType,
+  ExternalLink,
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 interface FeedPost {
   id: string
-  tipo: 'texto' | 'foto' | 'aviso'
+  tipo: 'texto' | 'foto' | 'aviso' | 'pdf'
   contenido: string
   mediaKey: string | null
   createdAt: string
@@ -34,7 +36,7 @@ interface FeedPost {
   section: { nombre: string; grado: string }
 }
 
-type Tipo = 'texto' | 'foto' | 'aviso'
+type Tipo = 'texto' | 'foto' | 'aviso' | 'pdf'
 
 const tipoConfig: Record<Tipo, { label: string; icon: React.ReactNode; badge: string }> = {
   texto: {
@@ -52,6 +54,24 @@ const tipoConfig: Record<Tipo, { label: string; icon: React.ReactNode; badge: st
     icon: <Megaphone className="w-3 h-3" />,
     badge: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
   },
+  pdf: {
+    label: 'PDF',
+    icon: <FileType className="w-3 h-3" />,
+    badge: 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300',
+  },
+}
+
+function fileUrl(mediaKey: string | null): string | null {
+  if (!mediaKey) return null
+  if (mediaKey.startsWith('http') || mediaKey.startsWith('/api/')) return mediaKey
+  if (mediaKey.startsWith('/')) return `/api/files${mediaKey}`
+  return `/api/files/${mediaKey}`
+}
+
+function isPdf(mediaKey: string | null, tipo: string): boolean {
+  if (tipo === 'pdf') return true
+  if (!mediaKey) return false
+  return mediaKey.toLowerCase().endsWith('.pdf')
 }
 
 function formatRelative(iso: string): string {
@@ -139,6 +159,9 @@ export function AlumnoFeed() {
             const cfg = tipoConfig[p.tipo] || tipoConfig.texto
             const profesorName = `${p.profesor.nombre} ${p.profesor.apellido}`
             const initials = `${p.profesor.nombre?.[0] || ''}${p.profesor.apellido?.[0] || ''}`.toUpperCase()
+            const mediaSrc = fileUrl(p.mediaKey)
+            const showPdf = isPdf(p.mediaKey, p.tipo) && !!mediaSrc
+            const showImg = !showPdf && p.mediaKey && p.tipo === 'foto'
             return (
               <Card key={p.id} className="overflow-hidden">
                 <CardContent className="pt-5 pb-5">
@@ -165,20 +188,45 @@ export function AlumnoFeed() {
                         {p.contenido}
                       </p>
 
-                      {p.mediaKey && p.tipo === 'foto' && (
+                      {showImg && mediaSrc && (
                         <button
-                          onClick={() => setExpandedPhoto(p.mediaKey.startsWith('/') ? p.mediaKey : `/uploads/${p.mediaKey}`)}
+                          onClick={() => setExpandedPhoto(mediaSrc)}
                           className="mt-3 block w-full rounded-lg overflow-hidden border hover:opacity-90 transition-opacity"
                         >
                           <img
-                            src={p.mediaKey.startsWith('/') ? p.mediaKey : `/uploads/${p.mediaKey}`}
+                            src={mediaSrc}
                             alt="Foto adjunta"
                             className="w-full max-h-72 object-cover"
                           />
                         </button>
                       )}
 
-                      {p.mediaKey && p.tipo !== 'foto' && (
+                      {showPdf && mediaSrc && (
+                        <a
+                          href={mediaSrc}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-3 flex items-center gap-3 rounded-lg border border-rose-200 dark:border-rose-900 bg-rose-50/50 dark:bg-rose-950/20 p-3 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+                        >
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-200">
+                            <FileType className="w-5 h-5" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-rose-900 dark:text-rose-100 truncate">
+                              Documento PDF
+                            </p>
+                            <p className="text-xs text-rose-700/80 dark:text-rose-300/80 truncate">
+                              {p.mediaKey?.split('/').pop() || 'archivo.pdf'}
+                            </p>
+                          </div>
+                          <Button size="sm" variant="outline" className="border-rose-300 text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40">
+                            <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                            Ver PDF
+                          </Button>
+                        </a>
+                      )}
+
+                      {!showImg && !showPdf && p.mediaKey && (
                         <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                           <ImageIcon className="w-3 h-3" />
                           <span>Archivo adjunto</span>

@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { api } from '@/lib/api-client'
+import { api, apiFetch } from '@/lib/api-client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import {
@@ -19,6 +20,11 @@ import {
   ShieldCheck,
   Download,
   RefreshCw,
+  MessageCircle,
+  Phone,
+  Camera,
+  Upload,
+  Users,
 } from 'lucide-react'
 
 interface PlantelInfo {
@@ -40,6 +46,16 @@ interface SectionInfo {
   plantel: PlantelInfo
 }
 
+interface RepresentanteInfo {
+  id: string
+  nombre: string
+  apellido: string
+  telefono: string | null
+  whatsapp: string | null
+  parentesco: string
+  esPrincipal: boolean
+}
+
 interface AlumnoProfile {
   id: string
   codigoUnico: string
@@ -49,8 +65,10 @@ interface AlumnoProfile {
   fechaNacimiento: string | null
   genero: string | null
   qrCode: string
+  fotoKey: string | null
   activo: boolean
   section: SectionInfo
+  representantes?: RepresentanteInfo[]
 }
 
 function capitalizeTurno(turno: string): string {
@@ -76,10 +94,30 @@ function calcularEdad(fechaNac: string | null): string {
   }
 }
 
+function parentescoLabel(p: string): string {
+  const map: Record<string, string> = {
+    madre: 'Madre',
+    padre: 'Padre',
+    tutor: 'Tutor/a',
+    otro: 'Representante',
+  }
+  return map[p] || p
+}
+
+// Normaliza un número de teléfono a dígitos (sin +, espacios ni guiones)
+function normalizePhone(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const digits = raw.replace(/[^\d]/g, '')
+  return digits.length >= 8 ? digits : null
+}
+
 export function CarnetDigital() {
   const user = useAuthStore((s) => s.user)
+  const token = useAuthStore((s) => s.token)
   const [profile, setProfile] = useState<AlumnoProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = async () => {
     setLoading(true)
@@ -115,6 +153,37 @@ export function CarnetDigital() {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
     toast.success('Código QR descargado')
+  }
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !profile) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Solo se permiten imágenes')
+      return
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error('La imagen no debe superar 15MB')
+      return
+    }
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('estudianteId', profile.id)
+      const data = await apiFetch<{ mediaKey: string }>('/alumno/photo', {
+        method: 'POST',
+        body: formData,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      setProfile({ ...profile, fotoKey: data.mediaKey })
+      toast.success('Foto de perfil actualizada')
+    } catch (err: unknown) {
+      toast.error('Error al subir foto: ' + (err as Error).message)
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
   }
 
   if (loading) {
@@ -160,6 +229,9 @@ export function CarnetDigital() {
 
   const initials = `${profile.nombre?.[0] || ''}${profile.apellido?.[0] || ''}`.toUpperCase()
   const section = profile.section
+  const representantes = profile.representantes || []
+  const representantePrincipal = representantes.find((r) => r.esPrincipal) || representantes[0] || null
+  const whatsappNumber = normalizePhone(representantePrincipal?.whatsapp || representantePrincipal?.telefono)
 
   return (
     <div className="space-y-6">
@@ -216,8 +288,40 @@ export function CarnetDigital() {
           {/* Cuerpo de la tarjeta */}
           <div className="p-5 space-y-4">
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-2xl font-bold shrink-0 border-4 border-emerald-100 dark:border-emerald-950">
-                {initials}
+              <div className="relative shrink-0">
+                <Avatar className="w-16 h-16 border-4 border-emerald-100 dark:border-emerald-950">
+                  {profile.fotoKey ? (
+                    <AvatarImage
+                      src={`/api/files/${profile.fotoKey}`}
+                      alt={`${profile.nombre} ${profile.apellido}`}
+                    />
+                  ) : null}
+                  <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white text-2xl font-bold">
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
+                {user?.rol === 'alumno' && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    title="Cambiar foto"
+                    className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-md border-2 border-white dark:border-emerald-950 disabled:opacity-50"
+                  >
+                    {uploading ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Camera className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                />
               </div>
               <div className="min-w-0">
                 <p className="text-lg font-bold leading-tight">
@@ -309,6 +413,163 @@ export function CarnetDigital() {
           </div>
         </div>
       </div>
+
+      {/* === REPRESENTANTE / WHATSAPP === */}
+      {representantePrincipal && (
+        <Card className="border-emerald-200 dark:border-emerald-900/50">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Users className="w-4 h-4 text-emerald-600" />
+              Representante
+              {representantePrincipal.esPrincipal && (
+                <Badge
+                  variant="outline"
+                  className="ml-1 border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-400"
+                >
+                  Principal
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <p className="font-semibold text-sm">
+                  {representantePrincipal.nombre} {representantePrincipal.apellido}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {parentescoLabel(representantePrincipal.parentesco)}
+                </p>
+              </div>
+              {whatsappNumber && (
+                <a
+                  href={`https://wa.me/${whatsappNumber}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-green-500 hover:bg-green-600 text-white text-sm font-medium transition-colors shadow-sm"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  WhatsApp
+                </a>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+              {representantePrincipal.telefono && (
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <Phone className="w-3 h-3" />
+                  <span>Teléfono: </span>
+                  <span className="font-mono font-semibold text-foreground">
+                    {representantePrincipal.telefono}
+                  </span>
+                </div>
+              )}
+              {representantePrincipal.whatsapp && (
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <MessageCircle className="w-3 h-3" />
+                  <span>WhatsApp: </span>
+                  <span className="font-mono font-semibold text-foreground">
+                    {representantePrincipal.whatsapp}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {representantes.length > 1 && (
+              <div className="pt-3 border-t">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+                  Otros representantes
+                </p>
+                <div className="space-y-2">
+                  {representantes
+                    .filter((r) => r.id !== representantePrincipal.id)
+                    .map((r) => {
+                      const wNum = normalizePhone(r.whatsapp || r.telefono)
+                      return (
+                        <div
+                          key={r.id}
+                          className="flex items-center justify-between gap-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <span className="font-medium">
+                              {r.nombre} {r.apellido}
+                            </span>
+                            <span className="text-muted-foreground ml-1">
+                              · {parentescoLabel(r.parentesco)}
+                            </span>
+                          </div>
+                          {wNum && (
+                            <a
+                              href={`https://wa.me/${wNum}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-green-500/10 hover:bg-green-500/20 text-green-700 dark:text-green-400 transition-colors"
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              WhatsApp
+                            </a>
+                          )}
+                        </div>
+                      )
+                    })}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* === FOTO UPLOAD (alumno only) === */}
+      {user?.rol === 'alumno' && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Camera className="w-4 h-4 text-emerald-600" />
+              Foto de perfil
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-4">
+              <Avatar className="w-16 h-16 border-2 border-emerald-100 dark:border-emerald-950">
+                {profile.fotoKey ? (
+                  <AvatarImage
+                    src={`/api/files/${profile.fotoKey}`}
+                    alt="Foto de perfil"
+                  />
+                ) : null}
+                <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white text-xl font-bold">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-muted-foreground">
+                  {profile.fotoKey
+                    ? 'Tienes una foto de perfil cargada.'
+                    : 'Aún no tienes foto de perfil.'}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  {uploading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-1 animate-spin" />
+                      Subiendo…
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 mr-1" />
+                      {profile.fotoKey ? 'Cambiar foto' : 'Subir foto'}
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Info adicional */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

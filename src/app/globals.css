@@ -118,5 +118,18 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Tamaño de fuente base aumentado para mejor legibilidad */
+    font-size: 17px;
+    -webkit-text-size-adjust: 100%;
+  }
+  /* Texto más grande en móvil */
+  @media (max-width: 640px) {
+    body {
+      font-size: 16px;
+    }
+  }
+  /* Aumentar contraste de texto secundario */
+  .text-muted-foreground {
+    opacity: 0.85;
   }
 }

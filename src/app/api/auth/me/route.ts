@@ -30,9 +30,10 @@ export async function GET(request: NextRequest) {
       apellido: string
       email: string | null
       telefono: string | null
+      whatsapp: string | null
       activo: number
     }>(
-      'SELECT id, cedula, rol, nombre, apellido, email, telefono, activo FROM v3_users WHERE id = ? LIMIT 1',
+      'SELECT id, cedula, rol, nombre, apellido, email, telefono, whatsapp, activo FROM v3_users WHERE id = ? LIMIT 1',
       [payload.id]
     )
     // Normalizar booleano
@@ -49,6 +50,7 @@ export async function GET(request: NextRequest) {
         apellido: true,
         email: true,
         telefono: true,
+        whatsapp: true,
         activo: true,
       },
     })

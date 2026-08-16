@@ -7,6 +7,7 @@ import { ChildSelector } from './child-selector'
 import { formatRelative } from './utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -17,6 +18,8 @@ import {
   Megaphone,
   FileText,
   Users,
+  FileType,
+  ExternalLink,
 } from 'lucide-react'
 
 interface FeedPostItem {
@@ -41,6 +44,20 @@ const tipoMeta: Record<string, { label: string; icon: React.ComponentType<{ clas
   texto: { label: 'Mensaje', icon: FileText, color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' },
   foto: { label: 'Foto', icon: Camera, color: 'bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300' },
   aviso: { label: 'Aviso', icon: Megaphone, color: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300' },
+  pdf: { label: 'PDF', icon: FileType, color: 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' },
+}
+
+function fileUrl(mediaKey: string | null): string | null {
+  if (!mediaKey) return null
+  if (mediaKey.startsWith('http') || mediaKey.startsWith('/api/')) return mediaKey
+  if (mediaKey.startsWith('/')) return `/api/files${mediaKey}`
+  return `/api/files/${mediaKey}`
+}
+
+function isPdf(mediaKey: string | null, tipo: string): boolean {
+  if (tipo === 'pdf') return true
+  if (!mediaKey) return false
+  return mediaKey.toLowerCase().endsWith('.pdf')
 }
 
 export function RepresentanteFeed() {
@@ -72,13 +89,9 @@ export function RepresentanteFeed() {
   // pero recargamos por si las secciones varían).
   useEffect(() => {
     if (children.length === 0) return
-    let active = true
     loadFeed().catch(() => {
       // errores ya manejados dentro de loadFeed
     })
-    return () => {
-      active = false
-    }
   }, [selectedChildId, children.length, loadFeed])
 
   return (
@@ -137,6 +150,9 @@ export function RepresentanteFeed() {
                   const meta = tipoMeta[p.tipo] || tipoMeta.texto
                   const Icon = meta.icon
                   const initials = `${p.profesor.nombre?.[0] || ''}${p.profesor.apellido?.[0] || ''}`.toUpperCase()
+                  const mediaSrc = fileUrl(p.mediaKey)
+                  const showPdf = isPdf(p.mediaKey, p.tipo) && !!mediaSrc
+                  const showImg = !showPdf && p.mediaKey && p.tipo === 'foto'
                   return (
                     <li key={p.id}>
                       <article className="rounded-xl border bg-card p-4 hover:shadow-sm transition-shadow">
@@ -165,10 +181,10 @@ export function RepresentanteFeed() {
                           {p.contenido}
                         </p>
                         {/* Foto real */}
-                        {p.mediaKey && (
+                        {showImg && mediaSrc && (
                           <div className="mt-3 rounded-lg overflow-hidden border border-emerald-200 dark:border-emerald-900">
                             <img
-                              src={p.mediaKey.startsWith('/') ? p.mediaKey : `/uploads/${p.mediaKey}`}
+                              src={mediaSrc}
                               alt="Foto adjunta"
                               className="w-full max-h-96 object-cover"
                               loading="lazy"
@@ -182,6 +198,31 @@ export function RepresentanteFeed() {
                               }}
                             />
                           </div>
+                        )}
+                        {/* Tarjeta PDF */}
+                        {showPdf && mediaSrc && (
+                          <a
+                            href={mediaSrc}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-3 flex items-center gap-3 rounded-lg border border-rose-200 dark:border-rose-900 bg-rose-50/50 dark:bg-rose-950/20 p-3 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+                          >
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-rose-100 text-rose-700 dark:bg-rose-900 dark:text-rose-200">
+                              <FileType className="w-5 h-5" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-rose-900 dark:text-rose-100 truncate">
+                                Documento PDF
+                              </p>
+                              <p className="text-xs text-rose-700/80 dark:text-rose-300/80 truncate">
+                                {p.mediaKey?.split('/').pop() || 'archivo.pdf'}
+                              </p>
+                            </div>
+                            <Button size="sm" variant="outline" className="border-rose-300 text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40">
+                              <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                              Ver PDF
+                            </Button>
+                          </a>
                         )}
                       </article>
                     </li>

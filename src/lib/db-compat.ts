@@ -90,7 +90,7 @@ function buildSet(data: any): { sql: string; params: any[] } {
 // Crear un modelo proxy que usa D1 o Prisma según el entorno
 function createModelProxy(modelName: string) {
   return {
-    async findUnique({ where, select }: { where: any; select?: any }) {
+    async findUnique({ where, select, include }: { where: any; select?: any; include?: any }) {
       if (isD1()) {
         const table = TABLES[modelName]
         const { sql, params } = buildWhere(where)
@@ -98,10 +98,10 @@ function createModelProxy(modelName: string) {
         return normalizeRow(row)
       }
       const { db } = await import('./db-dev')
-      return db[modelName].findUnique({ where, select })
+      return db[modelName].findUnique({ where, select, include })
     },
 
-    async findFirst({ where, select, orderBy }: { where?: any; select?: any; orderBy?: any }) {
+    async findFirst({ where, select, orderBy, include }: { where?: any; select?: any; orderBy?: any; include?: any }) {
       if (isD1()) {
         const table = TABLES[modelName]
         const { sql, params } = buildWhere(where)
@@ -110,7 +110,7 @@ function createModelProxy(modelName: string) {
         return normalizeRow(row)
       }
       const { db } = await import('./db-dev')
-      return db[modelName].findFirst({ where, select, orderBy })
+      return db[modelName].findFirst({ where, select, orderBy, include })
     },
 
     async findMany({ where, select, orderBy, take, skip, include }: { where?: any; select?: any; orderBy?: any; take?: number; skip?: number; include?: any }) {
@@ -147,6 +147,21 @@ function createModelProxy(modelName: string) {
       }
       const { db } = await import('./db-dev')
       return db[modelName].create({ data, select })
+    },
+
+    async createMany({ data }: { data: any[] }) {
+      if (isD1()) {
+        const table = TABLES[modelName]
+        for (const item of data) {
+          const keys = Object.keys(item).filter(k => item[k] !== undefined)
+          const placeholders = keys.map(() => '?').join(', ')
+          const values = keys.map((k: string) => typeof item[k] === 'boolean' ? (item[k] ? 1 : 0) : item[k])
+          await d1Run(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`, values)
+        }
+        return { count: data.length }
+      }
+      const { db } = await import('./db-dev')
+      return db[modelName].createMany({ data })
     },
 
     async update({ where, data, select }: { where: any; data: any; select?: any }) {
