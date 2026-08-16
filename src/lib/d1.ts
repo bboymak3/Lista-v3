@@ -3,22 +3,27 @@
  * En desarrollo usa Prisma contra SQLite local.
  */
 
-function getD1(): D1Database | null {
+function getCloudflareContext(): any | null {
   try {
-    const g = globalThis as Record<string, unknown>
-    const d1 = g.DB as D1Database | undefined
-    if (d1 && typeof d1.prepare === 'function') return d1
-  } catch { /* ignore */ }
-  try {
-    const { getRequestContext } = require('@opennextjs/cloudflare/next')
-    const env = getRequestContext().env
-    const d1 = (env as Record<string, unknown>).DB as D1Database | undefined
-    if (d1 && typeof d1.prepare === 'function') return d1
+    // OpenNext expone el contexto vía globalThis con el símbolo __cloudflare-context__
+    const sym = Symbol.for('__cloudflare-context__')
+    const ctx = (globalThis as any)[sym]
+    if (ctx?.env) return ctx
   } catch { /* ignore */ }
   return null
 }
 
-export const isD1 = () => getD1() !== null
+export function isD1(): boolean {
+  const ctx = getCloudflareContext()
+  return !!(ctx?.env?.DB)
+}
+
+function getD1(): D1Database | null {
+  const ctx = getCloudflareContext()
+  const d1 = ctx?.env?.DB as D1Database | undefined
+  if (d1 && typeof d1.prepare === 'function') return d1
+  return null
+}
 
 export async function d1Query<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   const d1 = getD1()
@@ -38,17 +43,4 @@ export async function d1Run(sql: string, params: unknown[] = []): Promise<void> 
 export async function d1First<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T | null> {
   const rows = await d1Query<T>(sql, params)
   return rows[0] || null
-}
-
-export async function d1Insert(table: string, data: Record<string, unknown>): Promise<void> {
-  const keys = Object.keys(data)
-  const placeholders = keys.map(() => '?').join(', ')
-  const values = keys.map(k => data[k])
-  await d1Run(`INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`, values)
-}
-
-export async function d1Update(table: string, data: Record<string, unknown>, where: string, whereParams: unknown[] = []): Promise<void> {
-  const sets = Object.keys(data).map(k => `${k} = ?`).join(', ')
-  const values = Object.keys(data).map(k => data[k])
-  await d1Run(`UPDATE ${table} SET ${sets} WHERE ${where}`, [...values, ...whereParams])
 }
