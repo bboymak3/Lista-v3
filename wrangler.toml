@@ -1,8 +1,13 @@
 #:schema node_modules/wrangler/config-schema.json
-name = "lista-v3"
+name = "lista"
 compatibility_date = "2025-05-01"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = ".open-next/assets"
+main = ".open-next/worker.js"
+
+# Assets (static files from Next.js)
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
 
 # D1 Database binding
 [[d1_databases]]
@@ -21,4 +26,4 @@ enabled = true
 
 # Vars
 [vars]
-NEXT_PUBLIC_APP_URL = "https://lista-v3.pages.dev"
+NEXT_PUBLIC_APP_URL = "https://lista.workers.dev"

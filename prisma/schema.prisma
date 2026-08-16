@@ -40,6 +40,7 @@ model User {
   attendanceMarked      Attendance[]         @relation("AttendanceMarker")
 
   @@index([rol, activo])
+  @@map("v3_users")
 }
 
 // ============================================
@@ -61,6 +62,7 @@ model Plantel {
   sections Section[]
 
   @@index([nombre])
+  @@map("v3_plantels")
 }
 
 // ============================================
@@ -88,6 +90,7 @@ model Section {
 
   @@index([plantelId, activa])
   @@index([grado, turno])
+  @@map("v3_sections")
 }
 
 model SectionAssignment {
@@ -101,6 +104,7 @@ model SectionAssignment {
 
   @@unique([sectionId, userId])
   @@index([userId])
+  @@map("v3_section_assignments")
 }
 
 // ============================================
@@ -131,6 +135,7 @@ model Student {
 
   @@index([sectionId, activo])
   @@index([nombre, apellido])
+  @@map("v3_students")
 }
 
 model ParentStudent {
@@ -145,6 +150,7 @@ model ParentStudent {
 
   @@unique([representanteId, estudianteId])
   @@index([estudianteId])
+  @@map("v3_parent_student")
 }
 
 // ============================================
@@ -164,6 +170,7 @@ model AttendanceSession {
 
   @@index([sectionId, fecha])
   @@index([estado])
+  @@map("v3_attendance_sessions")
 }
 
 model Attendance {
@@ -183,6 +190,7 @@ model Attendance {
 
   @@unique([estudianteId, sessionId])
   @@index([estudianteId, fecha])
+  @@map("v3_attendance")
 }
 
 // ============================================
@@ -199,6 +207,7 @@ model ProfessorCheckin {
   timestamp  DateTime @default(now())
 
   @@index([profesorId, timestamp])
+  @@map("v3_professor_checkin")
 }
 
 // ============================================
@@ -218,6 +227,7 @@ model FeedPost {
 
   @@index([sectionId, createdAt])
   @@index([profesorId, createdAt])
+  @@map("v3_feed_posts")
 }
 
 // ============================================
@@ -236,6 +246,7 @@ model Notification {
 
   @@index([destinatarioId, leida])
   @@index([createdAt])
+  @@map("v3_notifications")
 }
 
 // ============================================
@@ -252,6 +263,7 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@map("v3_push_subscriptions")
 }
 
 // ============================================
@@ -268,4 +280,5 @@ model LocationPing {
   timestamp    DateTime @default(now())
 
   @@index([estudianteId, timestamp])
+  @@map("v3_location_pings")
 }
