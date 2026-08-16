@@ -52,3 +52,7 @@ prompt
 server.log
 # Skills directory
 /skills/
+# OpenNext build artifacts
+.open-next/
+.next/
+.vercel/

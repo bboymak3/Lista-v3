@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { isD1, d1First } from '@/lib/d1'
 import { db } from '@/lib/db'
 import { getUserFromRequest } from '@/lib/auth'
 
@@ -8,6 +9,13 @@ async function verifyOwnership(
   representanteId: string,
   estudianteId: string
 ): Promise<boolean> {
+  if (isD1()) {
+    const link = await d1First<{ id: string }>(
+      'SELECT id FROM v3_parent_student WHERE representanteId = ? AND estudianteId = ? LIMIT 1',
+      [representanteId, estudianteId]
+    )
+    return !!link
+  }
   const link = await db.parentStudent.findUnique({
     where: {
       representanteId_estudianteId: { representanteId, estudianteId },
@@ -58,12 +66,35 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  // Si NO hay wait, devolver el último ping inmediatamente
-  if (!doWait) {
-    const latest = await db.locationPing.findFirst({
+  // Helper para obtener el último ping
+  const getLatest = async (): Promise<{
+    id: string
+    lat: number
+    lng: number
+    precision: number | null
+    timestamp: string | Date
+  } | null> => {
+    if (isD1()) {
+      return await d1First<{
+        id: string
+        lat: number
+        lng: number
+        precision: number | null
+        timestamp: string
+      }>(
+        'SELECT id, lat, lng, precision, timestamp FROM v3_location_pings WHERE estudianteId = ? ORDER BY timestamp DESC LIMIT 1',
+        [estudianteId]
+      )
+    }
+    return await db.locationPing.findFirst({
       where: { estudianteId },
       orderBy: { timestamp: 'desc' },
     })
+  }
+
+  // Si NO hay wait, devolver el último ping inmediatamente
+  if (!doWait) {
+    const latest = await getLatest()
     if (!latest) {
       return NextResponse.json({ location: null })
     }
@@ -84,15 +115,12 @@ export async function GET(request: NextRequest) {
   const start = Date.now()
 
   // Primera verificación inmediata
-  let latest = await db.locationPing.findFirst({
-    where: { estudianteId },
-    orderBy: { timestamp: 'desc' },
-  })
+  let latest = await getLatest()
 
-  const isNewer = (ping: { timestamp: Date } | null): boolean => {
+  const isNewer = (ping: { timestamp: string | Date } | null): boolean => {
     if (!ping) return false
     if (!lastTimestamp) return true
-    return ping.timestamp.getTime() > lastTimestamp.getTime()
+    return new Date(ping.timestamp).getTime() > lastTimestamp.getTime()
   }
 
   if (isNewer(latest)) {
@@ -112,10 +140,7 @@ export async function GET(request: NextRequest) {
   // Bucle de polling
   while (Date.now() - start < MAX_WAIT) {
     await wait(POLL_INTERVAL)
-    latest = await db.locationPing.findFirst({
-      where: { estudianteId },
-      orderBy: { timestamp: 'desc' },
-    })
+    latest = await getLatest()
     if (isNewer(latest)) {
       return NextResponse.json({
         location: latest

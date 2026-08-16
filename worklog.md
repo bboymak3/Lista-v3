@@ -233,3 +233,60 @@ Stage Summary:
 - Verificado en browser: profesor publica aviso → representante lo ve en su feed ("hace un momento")
 - Service Worker registrado correctamente (scope: http://localhost:3000/)
 - Todos los endpoints responden 200 sin errores de consola
+
+---
+Task ID: D1-ADAPT
+Agent: full-stack-developer (D1 adaptation)
+Task: Adapt 28 API routes from Prisma to D1-compatible pattern
+
+Work Log:
+- Leído contexto: worklog.md (5 tareas previas), src/lib/d1.ts (adapter), src/app/api/auth/login/route.ts (patrón referencia).
+- Verificado que las 28 rutas API bajo src/app/api/ ya usan el patrón directo D1 (isD1 ? d1Query/d1First/d1Run : db.X.findMany/create/update):
+  - Auth (1): auth/me/route.ts — d1First SELECT con normalización `activo === 1`
+  - Admin (9):
+    - admin/students/route.ts (GET con JOIN a v3_sections + sub-batch query a v3_parent_student→v3_users; POST con d1Run INSERT y verificación previa)
+    - admin/students/[id]/route.ts (PUT con SET dinámico + JOIN; DELETE soft con `activo = 0`)
+    - admin/sections/route.ts (GET con subquery `(SELECT COUNT(*) FROM v3_students WHERE sectionId = s.id AND activo = 1) AS studentCount`; POST con upsert manual de SectionAssignment)
+    - admin/sections/[id]/route.ts (PUT reasigna tutor + sincroniza SectionAssignment; DELETE soft con `activa = 0`)
+    - admin/plantels/route.ts (GET con subquery sectionCount; POST con d1Run INSERT)
+    - admin/plantels/[id]/route.ts (PUT con SET dinámico para geocerca lat/lng/radioM)
+    - admin/users/route.ts (GET con filtro LIKE; POST con hashPassword + verificación unicidad)
+    - admin/users/[id]/route.ts (PUT con re-hash opcional; DELETE soft bloqueando auto-desactivación)
+    - admin/stats/route.ts (GET con 4 COUNT paralelos + JOIN v3_attendance→v3_students para agrupar por sección + actividad reciente con 3 queries JOIN)
+  - Profesor (5):
+    - profesor/sections/route.ts (GET con subqueries para studentCount y assignmentRole; JOIN v3_sections + v3_plantels + v3_section_assignments)
+    - profesor/students/route.ts (GET con checkSectionAccess via JOIN + listado ordenado)
+    - profesor/attendance/route.ts (GET con JOIN attendance→students; POST con upsert manual por (estudianteId, sessionId); PUT con auto-marcar ausentes + notificaciones)
+    - profesor/checkin/route.ts (GET estado hoy + historial 7 días; POST idempotente entrada/salida)
+    - profesor/feed/route.ts (GET con JOIN a sections; POST con notificaciones a representantes principales vía JOIN v3_parent_student→v3_students)
+  - Representante (5):
+    - representante/children/route.ts (GET con JOIN 4 tablas: parent_student→students→sections→plantels)
+    - representante/location/route.ts (GET con long polling 25s; verifyOwnership helper con isD1)
+    - representante/attendance/route.ts (GET con JOIN v3_attendance→v3_attendance_sessions)
+    - representante/feed/route.ts (GET con batch: recopila sectionIds de hijos, luego JOIN v3_feed_posts→v3_users→v3_sections)
+    - representante/notifications/route.ts (GET con `ORDER BY leida ASC, createdAt DESC`)
+  - Alumno (5):
+    - alumno/profile/route.ts (GET con JOIN v3_students→v3_sections→v3_plantels; normalización `activo === 1`)
+    - alumno/checkin/route.ts (GET estado + datos plantel; POST con Haversine, geocerca 403 con distancia/radioPermitido, idempotencia y sobrescritura, búsqueda/creación de sesión)
+    - alumno/location/route.ts (GET último ping; POST crea LocationPing)
+    - alumno/feed/route.ts (GET con JOIN v3_feed_posts→v3_users→v3_sections)
+    - alumno/attendance/route.ts (GET historial 30 días con LEFT JOIN a v3_attendance_sessions)
+  - General (3):
+    - notifications/route.ts (GET lista; PUT marca-leída individual o todas con `leida = 1`)
+    - push/subscribe/route.ts (GET vapid-public; POST upsert por endpoint; DELETE por endpoint+userId)
+    - upload/route.ts (POST: en prod usa R2 bucket via Symbol.for('__cloudflare-context__') en globalThis sin sharp; en dev usa filesystem + sharp opcional)
+- Confirmado con `git status`: 27 archivos modificados + 1 nuevo (upload) = 28 rutas. Cambios sin commitear todavía.
+- Auditoría grep: cada ruta con `include:` (14 archivos) y `_count` (3 archivos: admin/plantels, admin/sections, profesor/sections) tiene su correspondiente rama `if (isD1())` con JOIN/subqueries.
+- Helpers compartidos (checkSectionAccess en profesor/feed y profesor/attendance; verifyOwnership en representante/location) también bifurcan isD1().
+- Booleanos D1 (INTEGER 0/1) normalizados a boolean en todas las respuestas (`activo === 1`, `activa === 1`, `leida === 1`, `esPrincipal === 1`).
+- Lógica de negocio preservada en ambas ramas: JWT, bcrypt, haversine, geocerca, idempotencia, push notifications VAPID (web-push lite), long polling 25s.
+- Lint final: 0 errores en `src/` (todos los 887 errores y 8924 warnings provienen de `.open-next/` y `.next/` artefactos de build generados, no del código fuente).
+
+Stage Summary:
+- 28 rutas API verificadas con el patrón directo D1 (isD1() ? SQL crudo : Prisma), bifurcando en cada llamada Prisma que usa include/relations/_count.
+- Cada rama D1 usa JOINs explícitos o subqueries correlacionadas para resolver relaciones y agregaciones.
+- Booleanos INTEGER normalizados en cada respuesta.
+- upload/route.ts correctamente configurado: R2 en prod (vía getCloudflareContext + Symbol.for('__cloudflare-context__'), sin sharp), filesystem+sharp en dev.
+- Lint source limpio; todos los errores reportados son artefactos de build en `.open-next/` (auto-generados por @opennextjs/cloudflare, no código fuente).
+- Dev server corre sin errores de compilación; rutas responden 200 en peticiones GET /.
+- Work pendiente: commitear los cambios (actualmente 27 modified + 1 untracked en src/app/api/).

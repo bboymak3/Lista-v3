@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { isD1, d1First, d1Run } from '@/lib/d1'
 import { db } from '@/lib/db'
 import { getUserFromRequest } from '@/lib/auth'
+import { v4 as uuidv4 } from 'uuid'
 
 // GET /api/push/vapid-public — devuelve la clave pública VAPID
 export async function GET(request: NextRequest) {
@@ -25,7 +27,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Suscripción inválida' }, { status: 400 })
     }
 
-    // Upsert: si ya existe el endpoint, actualizar
+    if (isD1()) {
+      // Producción: D1 — Upsert: si ya existe el endpoint, actualizar
+      const existing = await d1First<{ id: string }>(
+        'SELECT id FROM v3_push_subscriptions WHERE endpoint = ? LIMIT 1',
+        [endpoint]
+      )
+
+      const nowIso = new Date().toISOString()
+      if (existing) {
+        await d1Run(
+          `UPDATE v3_push_subscriptions SET userId = ?, p256dhKey = ?, authKey = ? WHERE id = ?`,
+          [user.id, keys.p256dh, keys.auth, existing.id]
+        )
+      } else {
+        const newId = uuidv4()
+        await d1Run(
+          `INSERT INTO v3_push_subscriptions (id, userId, endpoint, p256dhKey, authKey, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [newId, user.id, endpoint, keys.p256dh, keys.auth, nowIso]
+        )
+      }
+
+      return NextResponse.json({ success: true })
+    }
+
+    // Desarrollo: Prisma — Upsert: si ya existe el endpoint, actualizar
     const existing = await db.pushSubscription.findFirst({
       where: { endpoint },
     })
@@ -68,6 +95,16 @@ export async function DELETE(request: NextRequest) {
     const body = await request.json()
     const { endpoint } = body
 
+    if (isD1()) {
+      // Producción: D1
+      await d1Run(
+        'DELETE FROM v3_push_subscriptions WHERE endpoint = ? AND userId = ?',
+        [endpoint, user.id]
+      )
+      return NextResponse.json({ success: true })
+    }
+
+    // Desarrollo: Prisma
     await db.pushSubscription.deleteMany({
       where: { endpoint, userId: user.id },
     })

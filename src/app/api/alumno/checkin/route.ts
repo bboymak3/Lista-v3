@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+import { isD1, d1First, d1Run } from '@/lib/d1'
 import { db } from '@/lib/db'
 import { getUserFromRequest } from '@/lib/auth'
+import { v4 as uuidv4 } from 'uuid'
 
 function startOfToday(): Date {
   const d = new Date()
@@ -45,6 +47,67 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Acceso denegado' }, { status: 403 })
   }
 
+  if (isD1()) {
+    // Producción: D1
+    const student = await d1First<{
+      id: string
+      sectionId: string
+      plantelNombre: string
+      plantelLat: number
+      plantelLng: number
+      plantelRadioM: number
+    }>(
+      `SELECT st.id, st.sectionId,
+              p.nombre AS plantelNombre, p.lat AS plantelLat, p.lng AS plantelLng, p.radioM AS plantelRadioM
+       FROM v3_students st
+       INNER JOIN v3_sections s ON s.id = st.sectionId
+       LEFT JOIN v3_plantels p ON p.id = s.plantelId
+       WHERE st.userId = ? LIMIT 1`,
+      [payload.id]
+    )
+    if (!student) {
+      return NextResponse.json({ error: 'Perfil de estudiante no encontrado' }, { status: 404 })
+    }
+
+    const today = await d1First<{
+      id: string
+      estado: string
+      origen: string
+      lat: number | null
+      lng: number | null
+      fecha: string
+      sessionId: string | null
+    }>(
+      `SELECT id, estado, origen, lat, lng, fecha, sessionId
+       FROM v3_attendance
+       WHERE estudianteId = ? AND fecha >= ? AND fecha <= ?
+       ORDER BY fecha DESC
+       LIMIT 1`,
+      [student.id, startOfToday().toISOString(), endOfToday().toISOString()]
+    )
+
+    return NextResponse.json({
+      hoy: today
+        ? {
+            id: today.id,
+            estado: today.estado,
+            origen: today.origen,
+            lat: today.lat,
+            lng: today.lng,
+            fecha: today.fecha,
+            sessionId: today.sessionId,
+          }
+        : null,
+      plantel: {
+        nombre: student.plantelNombre,
+        lat: student.plantelLat,
+        lng: student.plantelLng,
+        radioM: student.plantelRadioM,
+      },
+    })
+  }
+
+  // Desarrollo: Prisma
   const student = await db.student.findUnique({
     where: { userId: payload.id },
     select: {
@@ -103,6 +166,150 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'lat y lng son requeridos (números)' }, { status: 400 })
   }
 
+  if (isD1()) {
+    // Producción: D1
+    const student = await d1First<{
+      id: string
+      sectionId: string
+      plantelId: string
+      plantelNombre: string
+      plantelLat: number
+      plantelLng: number
+      plantelRadioM: number
+    }>(
+      `SELECT st.id, st.sectionId,
+              p.id AS plantelId, p.nombre AS plantelNombre, p.lat AS plantelLat, p.lng AS plantelLng, p.radioM AS plantelRadioM
+       FROM v3_students st
+       INNER JOIN v3_sections s ON s.id = st.sectionId
+       LEFT JOIN v3_plantels p ON p.id = s.plantelId
+       WHERE st.userId = ? LIMIT 1`,
+      [payload.id]
+    )
+    if (!student) {
+      return NextResponse.json({ error: 'Perfil de estudiante no encontrado' }, { status: 404 })
+    }
+
+    if (!student.plantelId) {
+      return NextResponse.json(
+        { error: 'Tu sección no tiene plantel asociado' },
+        { status: 400 }
+      )
+    }
+
+    // Verificar geocerca
+    const distancia = haversineMeters(lat, lng, student.plantelLat, student.plantelLng)
+    if (distancia > student.plantelRadioM) {
+      return NextResponse.json(
+        {
+          error: 'Fuera del rango del plantel',
+          distancia,
+          radioPermitido: student.plantelRadioM,
+          plantelNombre: student.plantelNombre,
+        },
+        { status: 403 }
+      )
+    }
+
+    // Buscar registro de asistencia de hoy (si existe)
+    const existente = await d1First<{
+      id: string
+      estado: string
+      origen: string
+      lat: number | null
+      lng: number | null
+      fecha: string
+      sessionId: string | null
+    }>(
+      `SELECT id, estado, origen, lat, lng, fecha, sessionId
+       FROM v3_attendance
+       WHERE estudianteId = ? AND fecha >= ? AND fecha <= ?
+       ORDER BY fecha DESC
+       LIMIT 1`,
+      [student.id, startOfToday().toISOString(), endOfToday().toISOString()]
+    )
+
+    if (existente) {
+      if (existente.origen === 'gps_auto' && existente.estado === 'presente') {
+        return NextResponse.json({
+          ok: true,
+          yaExistente: true,
+          message: 'Check-in registrado: Presente',
+          asistencia: {
+            id: existente.id,
+            estado: existente.estado,
+            origen: existente.origen,
+            lat: existente.lat,
+            lng: existente.lng,
+            fecha: existente.fecha,
+            sessionId: existente.sessionId,
+          },
+          distancia,
+          radioPermitido: student.plantelRadioM,
+        })
+      }
+
+      // Sobrescribir registro existente
+      const nowIso = new Date().toISOString()
+      await d1Run(
+        `UPDATE v3_attendance SET estado = 'presente', origen = 'gps_auto', lat = ?, lng = ?, marcadoPor = ?, fecha = ? WHERE id = ?`,
+        [lat, lng, payload.id, nowIso, existente.id]
+      )
+
+      return NextResponse.json({
+        ok: true,
+        yaExistente: false,
+        message: 'Check-in registrado: Presente',
+        asistencia: {
+          id: existente.id,
+          estado: 'presente',
+          origen: 'gps_auto',
+          lat,
+          lng,
+          fecha: nowIso,
+          sessionId: existente.sessionId,
+        },
+        session: existente.sessionId ? { id: existente.sessionId } : null,
+        distancia,
+        radioPermitido: student.plantelRadioM,
+      })
+    }
+
+    // Buscar sesión activa de hoy para la sección del alumno
+    const session = await d1First<{ id: string; estado: string }>(
+      `SELECT id, estado FROM v3_attendance_sessions
+       WHERE sectionId = ? AND fecha >= ? AND fecha <= ? AND estado = 'activa'
+       ORDER BY fecha DESC LIMIT 1`,
+      [student.sectionId, startOfToday().toISOString(), endOfToday().toISOString()]
+    )
+
+    const newId = uuidv4()
+    const nowIso = new Date().toISOString()
+    await d1Run(
+      `INSERT INTO v3_attendance (id, estudianteId, sessionId, estado, observacion, origen, lat, lng, marcadoPor, fecha)
+       VALUES (?, ?, ?, 'presente', NULL, 'gps_auto', ?, ?, ?, ?)`,
+      [newId, student.id, session?.id ?? null, lat, lng, payload.id, nowIso]
+    )
+
+    return NextResponse.json({
+      ok: true,
+      yaExistente: false,
+      message: 'Check-in registrado: Presente',
+      asistencia: {
+        id: newId,
+        estado: 'presente',
+        origen: 'gps_auto',
+        lat,
+        lng,
+        fecha: nowIso,
+        sessionId: session?.id ?? null,
+      },
+      session: session ? { id: session.id, estado: session.estado } : null,
+      distancia,
+      radioPermitido: student.plantelRadioM,
+    })
+  }
+
+  // Desarrollo: Prisma
   const student = await db.student.findUnique({
     where: { userId: payload.id },
     select: {
