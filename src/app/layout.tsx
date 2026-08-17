@@ -18,6 +18,12 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "Lista",
   },
+  // Headers anti-caché para que siempre se sirva la última versión
+  other: {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+  },
 };
 
 export const viewport: Viewport = {

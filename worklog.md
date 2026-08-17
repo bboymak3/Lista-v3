@@ -448,3 +448,96 @@ Stage Summary:
 - Cloudflare Worker: https://lista.activo.workers.dev
 - D1 database: lista_db (tablas v3_* no tocan originales)
 - 4 roles funcionando: admin, profesor, representante, alumno
+
+---
+Task ID: WHATSAPP-INVITE
+Agent: full-stack-developer (WhatsApp invitation)
+Task: Generate invitation link + send via WhatsApp + accept invitation page
+
+Work Log:
+- Schema: Added `InvitationToken` model (id, token @unique, userId, used, expiresAt, createdAt, @@index([token, used]), @@map("v3_invitation_tokens")) to `prisma/schema.prisma` + `invitations InvitationToken[]` relation on User. Ran `bun run db:push`. Created D1 table via `wrangler d1 execute lista_db --remote`.
+- API: Created `src/app/api/admin/representantes/[id]/invite/route.ts` (POST: generates 40-char random token, 7-day expiry, invalidates previous tokens, returns `{ token, url, whatsappUrl, whatsappNumber, message, expiresAt, expiresAtDays }`; GET: returns latest invitation status). Both use `isD1()` pattern + `getUserFromRequest` for admin auth.
+- API: Created `src/app/api/auth/accept-invitation/route.ts` (GET: validates token + returns representante info; POST: validates again, hashes password with bcrypt, updates `v3_users.password`, marks `v3_invitation_tokens.used = 1`, returns JWT + user for auto-login). Public route, no auth required.
+- UI: Created `src/components/auth/accept-invitation.tsx` (public page with loading/valid/invalid/success states, password + confirm inputs with show/hide toggle, min 6 char validation, match validation, auto-login via `setAuth` + clears `?invitacion=` from URL on success).
+- Modified `src/app/page.tsx` to detect `?invitacion=` or `?token=` query param (only when not authenticated) and render `<AcceptInvitation />` instead of `<LoginForm />`.
+- Modified `src/components/direccion/users-manager.tsx`: refactored `openInvite()` to be async and call server-side `POST /api/admin/representantes/{id}/invite` (replaces previous client-side `?cedula=` URL approach); removed unused client-side helpers (`buildInvitationLink`, `buildWhatsAppMessage`, `buildWhatsAppUrl`); extended `inviteData` shape with `token`, `expiresAt`, `expiresAtDays`; added `inviteLoading` state; the "Crear Representante" success dialog now auto-fetches a server-generated invitation token right after creating the user and shows: name, cédula, backup password, invitation link + copy button, WhatsApp button + message preview, expiration info (7 días), "¿Cómo funciona?" help. Per-row "Invitar" button (MessageCircle icon, only on representante rows) opens the invitation dialog with the same server-side data + "Generar nuevo enlace" button (RefreshCw icon).
+- Live tested all endpoints via curl: invitation POST 200/400/403, invitation GET 200, accept-invitation GET 200/410, accept-invitation POST 200/400/410, follow-up login with new password 200. Token reuse correctly rejected (410).
+- Color theme: emerald/teal consistent with existing LoginForm. Spanish (Venezuela) text throughout. shadcn/ui + lucide-react (MessageCircle, Copy, Check, ExternalLink, RefreshCw, KeyRound, Link2). Sonner toasts.
+- Work record written to `/home/z/my-project/agent-ctx/WHATSAPP-INVITE-full-stack-developer.md`.
+
+Stage Summary:
+- 1 Prisma model added (`InvitationToken`), 1 relation added to User (`invitations`)
+- 1 D1 table created (`v3_invitation_tokens`)
+- 2 new API routes: `src/app/api/admin/representantes/[id]/invite/route.ts` (POST+GET), `src/app/api/auth/accept-invitation/route.ts` (GET+POST)
+- 1 new UI component: `src/components/auth/accept-invitation.tsx`
+- 2 modified UI files: `src/app/page.tsx`, `src/components/direccion/users-manager.tsx`
+- All endpoints verified working via curl in dev (D1 mode + Prisma mode via isD1() pattern)
+- Lint exit code 0 for all new/modified files
+
+---
+Task ID: ADMIN-REPRESENTANTE
+Agent: full-stack-developer (Admin representante management)
+Task: Crear representante + asignar múltiples alumnos (hermanos)
+
+Work Log:
+- Leído contexto previo: worklog (Tasks 0, 2-a, 2-b, 3, 5, PROFILES-WHATSAPP, D1-ADAPT), prisma/schema.prisma (User.whatsapp, ParentStudent con @@unique([representanteId, estudianteId])), src/lib/d1.ts (isD1, d1Query, d1First, d1Run), src/lib/db-auth.ts (hashPassword con bcrypt), src/lib/api-client.ts (api.get/post/put/delete con Bearer token), src/app/api/auth/login/route.ts (patrón isD1), src/app/api/admin/users/route.ts + [id]/route.ts (CRUD existente sin whatsapp), src/app/api/admin/students/route.ts + [id]/route.ts (CRUD estudiantes), src/components/direccion/users-manager.tsx (panel de usuarios con Tabs por rol y Dialog create/edit), src/components/representante/representante-dashboard.tsx + child-selector.tsx (selector con DropdownMenu para 2+ hijos).
+- Verificada columna `whatsapp` en v3_users (TEXT nullable) y v3_parent_student schema (id, representanteId, estudianteId, parentesco, esPrincipal BOOLEAN, createdAt) vía PRAGMA table_info.
+- 3 API routes NUEVAS creadas bajo `src/app/api/admin/representantes/`:
+  - `route.ts` (GET lista representantes con studentsCount vía subquery COUNT en v3_parent_student + POST crea representante con rol='representante' forzado, hashPassword bcrypt, validación unicidad cédula y email, INSERT con whatsapp). Buscable por nombre/apellido/cédula/email/whatsapp.
+  - `[id]/students/route.ts` (GET lista estudiantes asignados vía JOIN v3_parent_student → v3_students → v3_sections ORDER BY esPrincipal DESC, apellido ASC; POST asigna estudiante con body {estudianteId, parentesco, esPrincipal}: valida parentesco ∈ {madre,padre,tutor,otro}, valida que representante exista con rol='representante', valida estudiante exista, 409 si ya asignado, si esPrincipal=true hace UPDATE v3_parent_student SET esPrincipal=0 WHERE estudianteId=? AND esPrincipal=1 — reemplaza el principal anterior).
+  - `[id]/students/[studentId]/route.ts` (DELETE — DELETE FROM v3_parent_student WHERE representanteId=? AND estudianteId=?, 404 si no existe la asociación).
+- 2 API routes MODIFICADAS para soportar `whatsapp`:
+  - `src/app/api/admin/users/route.ts` (GET SELECT ahora incluye whatsapp, POST INSERT/SELECT/return incluye whatsapp).
+  - `src/app/api/admin/users/[id]/route.ts` (PUT ahora incluye `whatsapp` en sets dinámicos UPDATE + SELECT de retorno).
+- Componente NUEVO `src/components/direccion/representante-students.tsx` (vista admin-representante-students):
+  - Layout grid 2 columnas: sidebar de representantes (izquierda, 320px) + panel de estudiantes asignados (derecha, 1fr).
+  - Lista de representantes con avatar (iniciales), cédula, badge count de estudiantes (GraduationCap icon). Auto-selecciona el primero.
+  - Búsqueda con debounce 250ms sobre representantes (filtra por nombre/apellido/cédula/email/whatsapp).
+  - Panel derecho muestra el representante seleccionado (header con cédula, teléfono, whatsapp con icono MessageCircle) + lista de estudiantes asignados (avatar, nombre, código, cédula escolar, sección, badge parentesco teal, badge "Principal" emerald si esPrincipal=true, botón "Quitar" para desvincular con confirmación).
+  - Botón "Agregar estudiante" → abre Dialog con Combobox (Popover + Command) buscable de TODOS los estudiantes (vía /api/admin/students?limit=200 + search), Select de parentesco (madre/padre/tutor/otro), Checkbox esPrincipal (default true), aviso explicativo cuando esPrincipal=true.
+  - Counts actualizados optimistamente en cliente tras assign/unlink.
+- Componente MODIFICADO `src/components/direccion/users-manager.tsx`:
+  - Añadido botón "Crear Representante" prominente (emerald, icono UserPlus) en la cabecera — visible cuando rolFilter ∈ {all, representante}.
+  - En el empty state, se muestran ambos botones (Crear Representante + Crear primer usuario).
+  - Nuevo estado `repDialogOpen`, `repForm` (cedula con prefix V-/E-, nombre, apellido, email opcional, telefono, whatsapp solo dígitos, password auto-generada), `repResult` (muestra cedula+password+invite link tras crear).
+  - Helper `generateRandomPassword(length=8)` — alfanumérico legible sin caracteres ambiguos (sin 0/O, 1/I/l), usando crypto.getRandomValues si disponible.
+  - Helper `buildInvitationLink(cedula)` — genera `${origin}/?cedula=V-1234567` client-side.
+  - Helper `buildWhatsAppMessage(nombre, cedula, password)` — texto con credenciales y enlace.
+  - Helper `buildWhatsAppUrl(whatsapp, message)` — `https://wa.me/{digits}?text={encodedMsg}` si el número es válido.
+  - Dialog dedicado con: formulario completo, contraseña auto-generada con botones "Regenerar" (RefreshCw) y "Copiar" (Copy/Check), botón submit "Crear y generar link de invitación" (UserPlus icon). Tras crear, vista de éxito muestra cédula (readonly), contraseña temporal (con copiar), enlace de invitación (con copiar), botón "Abrir WhatsApp" si tiene número, y "Crear otro" para encadenar.
+  - El flujo openInvite existente (que llamaba a /admin/representantes/{id}/invite — endpoint inexistente) fue reemplazado por generación client-side (sin llamada al backend). El Dialog de invitación para representantes existentes conserva su UX (enlace + WhatsApp + mensaje) pero ahora funciona sin API.
+  - Botón MessageCircle en la tabla (visible solo para rol=representante) abre el Dialog de invitación con datos del representante.
+  - Añadido soporte para `whatsapp` en el formulario de create/edit genérico (UserFormValues) — guarda el campo al hacer POST/PUT a /admin/users.
+- Editado `src/components/layouts/app-shell.tsx`:
+  - Importado `RepresentanteStudents` de `@/components/direccion/representante-students`.
+  - Añadido `{ id: 'representante-students', label: 'Asignar Representantes', icon: Users, view: 'admin-representante-students' }` al sidebar admin (después de "Enviar PDF", antes de "Usuarios").
+  - Añadido `case 'admin-representante-students': return <RepresentanteStudents />` en el ViewRenderer del rol admin.
+- Verificado con curl TODOS los endpoints (login admin → token Bearer):
+  - GET /api/admin/representantes?includeInactive=true → 200, lista Ana Rodríguez (studentsCount=1, whatsapp=null).
+  - GET sin token → 403 Forbidden.
+  - POST /api/admin/representantes con {cedula, nombre, apellido, whatsapp, password} → 201, devuelve user sin password.
+  - POST /api/admin/representantes con cédula duplicada → 409.
+  - POST /api/admin/representantes/{id}/students con {estudianteId, parentesco, esPrincipal=true} cuando el estudiante ya tenía otro representante principal → 201, y la asociación anterior fue demovida a esPrincipal=false (verificado con GET posterior: Ana's Carlos Pérez cambió de esPrincipal=true a false).
+  - POST asignación duplicada (mismo representante + mismo estudiante) → 409.
+  - POST segunda asignación a mismo representante con esPrincipal=false (hermano) → 201. GET devuelve 2 estudiantes (Carlos principal + Lucía no principal).
+  - DELETE /api/admin/representantes/{id}/students/{studentId} → 200, GET posterior muestra 1 estudiante.
+  - GET /api/admin/users?rol=profesor&search=Wpp devuelve el whatsapp (POST con whatsapp → 201 con whatsapp en respuesta).
+  - Search representantes por whatsapp → funciona (filtrado por whatsapp en SQL LIKE).
+  - Login de representante de prueba (V-99999999 / test12345) → 401 tras soft-delete (activo=false), comportamiento correcto.
+- Verificado que la representante app maneja múltiples hijos (hermanos):
+  - Asignados 2 estudiantes a Ana (Carlos principal + Lucía secundaria).
+  - GET /api/representante/children (como Ana) devuelve count=2 correctamente con esPrincipal=true para Carlos y esPrincipal=false para Lucía.
+  - El componente `child-selector.tsx` renderiza un DropdownMenu cuando length>1 con avatar+nombre+sección, Check icon en el seleccionado, y onClick dispara `selectChild(id)` que actualiza el store. El `representante-dashboard.tsx` recarga el detail del nuevo child vía useEffect dependiente de `selectedChild?.id`.
+- Limpieza: borradas las asociaciones de prueba (DELETE /students/{id}), re-asignado Carlos Pérez a Ana como principal (esPrincipal=true), soft-delete de los usuarios de prueba (Wpp Test profesor V-88888888, Searchable Rep V-77777777, Test Representante V-99999999). Estado final: Ana Rodríguez con 1 hijo (Carlos Pérez) como principal — mismo que al inicio.
+- Tema visual: emerald/teal consistente. Iconos lucide-react: UserPlus, RefreshCw, KeyRound, Link2, MessageCircle, ExternalLink, Copy, Check, Users, GraduationCap, Search, ChevronDown, AlertCircle, Trash2, Loader2. shadcn/ui: Dialog, AlertDialog, Popover, Command (Combobox), Select, Checkbox, Badge, Avatar, Skeleton, Input, Label, Button, Card, Switch (no usado en este archivo). Textos en español Venezuela. sonner para toasts.
+- Lint: `bunx eslint src/app/api/admin src/components/direccion src/components/layouts src/app/api/auth src/lib` → exit code 0, sin errores ni warnings. El lint completo del proyecto (`bun run lint`) hace OOM en el sandbox (4GB RAM), pero los archivos nuevos/modificados pasan limpios individualmente y en grupo.
+
+Stage Summary:
+- 3 archivos API creados en `src/app/api/admin/representantes/`: `route.ts` (GET+POST representantes), `[id]/students/route.ts` (GET+POST asignación), `[id]/students/[studentId]/route.ts` (DELETE desvincular).
+- 2 archivos API modificados: `src/app/api/admin/users/route.ts` (whatsapp en GET+POST) y `[id]/route.ts` (whatsapp en PUT).
+- 1 componente nuevo: `src/components/direccion/representante-students.tsx` (vista de asignación de estudiantes a representantes con Combobox buscable + manejo de hermanos + esPrincipal replacement).
+- 1 componente modificado: `src/components/direccion/users-manager.tsx` (botón "Crear Representante" + Dialog dedicado con password auto-generada + link de invitación client-side + cleanup del openInvite roto que llamaba endpoint inexistente + whatsapp en el form genérico).
+- 1 layout modificado: `src/components/layouts/app-shell.tsx` (sidebar admin con "Asignar Representantes" + case en ViewRenderer).
+- Todos los endpoints probados con curl: 200/201 OK, 403 sin auth, 409 duplicados, 404 no encontrados, esPrincipal replacement funciona (demote automático del principal anterior del estudiante).
+- Representante child-selector verificado: maneja múltiples hijos correctamente (DropdownMenu para 2+ hijos, recarga detail al cambiar de hijo).
+- Lint pasa limpio en todos los archivos nuevos/modificados. TypeScript sin errores.

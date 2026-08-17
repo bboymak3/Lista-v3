@@ -18,7 +18,7 @@ export async function PUT(
   try {
     const { id } = await params
     const body = await request.json()
-    const { cedula, nombre, apellido, email, password, rol, telefono, activo } = body
+    const { cedula, nombre, apellido, email, password, rol, telefono, whatsapp, activo } = body
 
     if (isD1()) {
       // Producción: D1
@@ -67,6 +67,7 @@ export async function PUT(
       if (email !== undefined) { sets.push('email = ?'); sqlParams.push(email || null) }
       if (rol !== undefined) { sets.push('rol = ?'); sqlParams.push(rol) }
       if (telefono !== undefined) { sets.push('telefono = ?'); sqlParams.push(telefono || null) }
+      if (whatsapp !== undefined) { sets.push('whatsapp = ?'); sqlParams.push(whatsapp || null) }
       if (activo !== undefined) { sets.push('activo = ?'); sqlParams.push(activo ? 1 : 0) }
 
       // Re-hashear password si viene
@@ -92,10 +93,11 @@ export async function PUT(
         email: string | null
         rol: string
         telefono: string | null
+        whatsapp: string | null
         activo: number
         createdAt: string
       }>(
-        'SELECT id, cedula, nombre, apellido, email, rol, telefono, activo, createdAt FROM v3_users WHERE id = ? LIMIT 1',
+        'SELECT id, cedula, nombre, apellido, email, rol, telefono, whatsapp, activo, createdAt FROM v3_users WHERE id = ? LIMIT 1',
         [id]
       )
 
@@ -107,6 +109,7 @@ export async function PUT(
         email: updated?.email,
         rol: updated?.rol,
         telefono: updated?.telefono,
+        whatsapp: updated?.whatsapp,
         activo: updated?.activo === 1,
         createdAt: updated?.createdAt,
       })
@@ -148,6 +151,7 @@ export async function PUT(
       ...(email !== undefined && { email: email || null }),
       ...(rol !== undefined && { rol }),
       ...(telefono !== undefined && { telefono: telefono || null }),
+      ...(whatsapp !== undefined && { whatsapp: whatsapp || null }),
       ...(activo !== undefined && { activo }),
     }
 
@@ -167,6 +171,7 @@ export async function PUT(
         email: true,
         rol: true,
         telefono: true,
+        whatsapp: true,
         activo: true,
         createdAt: true,
       },

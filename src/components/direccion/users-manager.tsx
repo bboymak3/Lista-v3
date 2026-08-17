@@ -59,7 +59,30 @@ import {
   GraduationCap,
   UserCircle,
   User,
+  UserPlus,
+  MessageCircle,
+  Copy,
+  Check,
+  ExternalLink,
+  RefreshCw,
+  KeyRound,
+  Link2,
 } from 'lucide-react'
+
+// Genera una contraseña aleatoria alfanumérica legible (sin caracteres ambiguos)
+function generateRandomPassword(length = 8): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789abcdefghijkmnpqrstuvwxyz'
+  let out = ''
+  const cryptoObj = typeof crypto !== 'undefined' ? crypto : undefined
+  if (cryptoObj && cryptoObj.getRandomValues) {
+    const arr = new Uint32Array(length)
+    cryptoObj.getRandomValues(arr)
+    for (let i = 0; i < length; i++) out += chars[arr[i] % chars.length]
+  } else {
+    for (let i = 0; i < length; i++) out += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return out
+}
 
 type RolKey = 'admin' | 'profesor' | 'representante' | 'alumno'
 
@@ -71,6 +94,7 @@ interface UserRow {
   email: string | null
   rol: RolKey
   telefono: string | null
+  whatsapp: string | null
   activo: boolean
   createdAt: string
 }
@@ -103,6 +127,7 @@ interface UserFormValues {
   apellido: string
   email: string
   telefono: string
+  whatsapp: string
   rol: RolKey
   password: string
 }
@@ -115,8 +140,33 @@ function emptyForm(rolDefault: RolKey = 'profesor'): UserFormValues {
     apellido: '',
     email: '',
     telefono: '',
+    whatsapp: '',
     rol: rolDefault,
     password: '',
+  }
+}
+
+interface RepFormValues {
+  cedulaPrefix: string
+  cedula: string
+  nombre: string
+  apellido: string
+  email: string
+  telefono: string
+  whatsapp: string
+  password: string
+}
+
+function emptyRepForm(): RepFormValues {
+  return {
+    cedulaPrefix: 'V-',
+    cedula: '',
+    nombre: '',
+    apellido: '',
+    email: '',
+    telefono: '',
+    whatsapp: '',
+    password: generateRandomPassword(),
   }
 }
 
@@ -131,6 +181,37 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
   const [submitting, setSubmitting] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  // Dedicated "Crear Representante" dialog state
+  const [repDialogOpen, setRepDialogOpen] = useState(false)
+  const [repForm, setRepForm] = useState<RepFormValues>(emptyRepForm())
+  const [repSubmitting, setRepSubmitting] = useState(false)
+  const [repCopied, setRepCopied] = useState(false)
+  const [repResult, setRepResult] = useState<{
+    cedula: string
+    nombre: string
+    password: string
+    whatsapp: string | null
+    inviteUrl: string
+    whatsappUrl: string | null
+    whatsappNumber: string | null
+    inviteMessage: string
+    expiresAt: string
+    expiresAtDays: number
+  } | null>(null)
+  // Invitation state (existing representantes — server-side invite token)
+  const [inviteTarget, setInviteTarget] = useState<UserRow | null>(null)
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteLoading, setInviteLoading] = useState(false)
+  const [inviteData, setInviteData] = useState<{
+    token: string
+    url: string
+    whatsappUrl: string | null
+    whatsappNumber: string | null
+    message: string
+    expiresAt: string
+    expiresAtDays: number
+  } | null>(null)
+  const [copied, setCopied] = useState(false)
 
   const loadUsers = useCallback(async () => {
     setLoading(true)
@@ -175,10 +256,108 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
       apellido: u.apellido,
       email: u.email || '',
       telefono: u.telefono || '',
+      whatsapp: u.whatsapp || '',
       rol: u.rol,
       password: '',
     })
     setDialogOpen(true)
+  }
+
+  const openCreateRepresentante = () => {
+    setRepForm(emptyRepForm())
+    setRepResult(null)
+    setRepCopied(false)
+    setRepDialogOpen(true)
+  }
+
+  const regenerateRepPassword = () => {
+    setRepForm((prev) => ({ ...prev, password: generateRandomPassword() }))
+  }
+
+  const copyRepPassword = async () => {
+    try {
+      await navigator.clipboard.writeText(repForm.password)
+      setRepCopied(true)
+      toast.success('Contraseña copiada')
+      setTimeout(() => setRepCopied(false), 2000)
+    } catch {
+      toast.error('No se pudo copiar')
+    }
+  }
+
+  const handleCreateRepresentante = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!repForm.cedula || !repForm.nombre || !repForm.apellido || !repForm.password) {
+      toast.error('Cédula, nombre, apellido y contraseña son obligatorios')
+      return
+    }
+    if (repForm.password.length < 6) {
+      toast.error('La contraseña debe tener al menos 6 caracteres')
+      return
+    }
+    setRepSubmitting(true)
+    try {
+      const fullCedula = `${repForm.cedulaPrefix}${repForm.cedula}`
+      const payload = {
+        cedula: fullCedula,
+        nombre: repForm.nombre,
+        apellido: repForm.apellido,
+        email: repForm.email || null,
+        telefono: repForm.telefono || null,
+        whatsapp: repForm.whatsapp || null,
+        password: repForm.password,
+      }
+      const created = await api.post<{ id: string; cedula: string; nombre: string }>(
+        '/admin/representantes',
+        payload
+      )
+      toast.success('Representante creado')
+      // Generar invitación server-side inmediatamente después de crear
+      let inviteUrl = ''
+      let whatsappUrl: string | null = null
+      let whatsappNumber: string | null = null
+      let inviteMessage = ''
+      let expiresAt = ''
+      let expiresAtDays = 7
+      try {
+        const inv = await api.post<{
+          token: string
+          url: string
+          whatsappUrl: string | null
+          whatsappNumber: string | null
+          message: string
+          expiresAt: string
+          expiresAtDays: number
+        }>(`/admin/representantes/${created.id}/invite`)
+        inviteUrl = inv.url
+        whatsappUrl = inv.whatsappUrl
+        whatsappNumber = inv.whatsappNumber
+        inviteMessage = inv.message
+        expiresAt = inv.expiresAt
+        expiresAtDays = inv.expiresAtDays
+      } catch (e: any) {
+        // Si falla la generación del token, aún podemos mostrar el resultado
+        // con password. El admin puede usar el botón "Invitar" después.
+        console.error('No se pudo generar invitación:', e)
+      }
+      setRepResult({
+        cedula: created.cedula,
+        nombre: created.nombre,
+        password: repForm.password,
+        whatsapp: repForm.whatsapp || null,
+        inviteUrl,
+        whatsappUrl,
+        whatsappNumber,
+        inviteMessage,
+        expiresAt,
+        expiresAtDays,
+      })
+      loadUsers()
+    } catch (e: any) {
+      toast.error(e.message || 'Error al crear representante')
+    } finally {
+      setRepSubmitting(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -200,6 +379,7 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
         apellido: form.apellido,
         email: form.email || null,
         telefono: form.telefono || null,
+        whatsapp: form.whatsapp || null,
         rol: form.rol,
       }
       if (form.password) payload.password = form.password
@@ -207,16 +387,55 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
       if (editing) {
         await api.put(`/admin/users/${editing.id}`, payload)
         toast.success('Usuario actualizado')
+        setDialogOpen(false)
+        loadUsers()
       } else {
         await api.post('/admin/users', payload)
         toast.success('Usuario creado')
+        setDialogOpen(false)
+        loadUsers()
       }
-      setDialogOpen(false)
-      loadUsers()
     } catch (e: any) {
       toast.error(e.message || 'Error al guardar usuario')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const openInvite = async (user: UserRow) => {
+    setInviteTarget(user)
+    setInviteData(null)
+    setCopied(false)
+    setInviteOpen(true)
+    setInviteLoading(true)
+    try {
+      const data = await api.post<{
+        token: string
+        url: string
+        whatsappUrl: string | null
+        whatsappNumber: string | null
+        message: string
+        expiresAt: string
+        expiresAtDays: number
+      }>(`/admin/representantes/${user.id}/invite`)
+      setInviteData(data)
+    } catch (e: any) {
+      toast.error(e.message || 'Error al generar invitación')
+      setInviteOpen(false)
+    } finally {
+      setInviteLoading(false)
+    }
+  }
+
+  const handleCopyLink = async () => {
+    if (!inviteData?.url) return
+    try {
+      await navigator.clipboard.writeText(inviteData.url)
+      setCopied(true)
+      toast.success('Enlace copiado al portapapeles')
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error('No se pudo copiar el enlace')
     }
   }
 
@@ -256,10 +475,25 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
             Administra cuentas de dirección, profesores, representantes y alumnos
           </p>
         </div>
-        <Button onClick={openCreate} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-          <Plus className="w-4 h-4" />
-          Nuevo usuario
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          {(rolFilter === 'all' || rolFilter === 'representante') && (
+            <Button
+              onClick={openCreateRepresentante}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              <UserPlus className="w-4 h-4" />
+              Crear Representante
+            </Button>
+          )}
+          <Button
+            onClick={openCreate}
+            variant="outline"
+            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+          >
+            <Plus className="w-4 h-4" />
+            Nuevo usuario
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -296,13 +530,25 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
             <div className="py-12 text-center">
               <Users className="w-10 h-10 mx-auto text-muted-foreground/50" />
               <p className="mt-3 text-sm text-muted-foreground">No hay usuarios registrados</p>
-              <Button
-                onClick={openCreate}
-                className="mt-4 bg-emerald-600 hover:bg-emerald-700 text-white"
-              >
-                <Plus className="w-4 h-4" />
-                Crear primer usuario
-              </Button>
+              <div className="mt-4 flex justify-center gap-2 flex-wrap">
+                {(rolFilter === 'all' || rolFilter === 'representante') && (
+                  <Button
+                    onClick={openCreateRepresentante}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    Crear Representante
+                  </Button>
+                )}
+                <Button
+                  onClick={openCreate}
+                  variant="outline"
+                  className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                >
+                  <Plus className="w-4 h-4" />
+                  Crear primer usuario
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="max-h-[60vh] overflow-y-auto -mx-2">
@@ -357,6 +603,18 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
+                            {u.rol === 'representante' && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+                                onClick={() => openInvite(u)}
+                                aria-label="Enviar invitación"
+                                title="Enviar invitación por WhatsApp"
+                              >
+                                <MessageCircle className="w-4 h-4" />
+                              </Button>
+                            )}
                             <Button
                               size="icon"
                               variant="ghost"
@@ -519,6 +777,323 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
         </DialogContent>
       </Dialog>
 
+      {/* Dedicated Crear Representante Dialog */}
+      <Dialog open={repDialogOpen} onOpenChange={setRepDialogOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-emerald-600" />
+              Crear Representante
+            </DialogTitle>
+            <DialogDescription>
+              Registra un representante. Se generará una contraseña temporal y un enlace de invitación para compartir.
+            </DialogDescription>
+          </DialogHeader>
+
+          {repResult ? (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 p-4">
+                <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
+                  <Check className="w-4 h-4" />
+                  Representante creado: {repResult.nombre}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-muted-foreground" />
+                  Cédula
+                </Label>
+                <Input readOnly value={repResult.cedula} className="font-mono text-sm" />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Contraseña temporal</Label>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={repResult.password}
+                    className="font-mono text-sm"
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={copyRepPassword}
+                    className="shrink-0"
+                    aria-label="Copiar contraseña"
+                  >
+                    {repCopied ? (
+                      <Check className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Contraseña de respaldo. El representante puede elegir su propia contraseña
+                  usando el enlace de invitación a continuación.
+                </p>
+              </div>
+
+              {repResult.inviteUrl ? (
+                <>
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <Link2 className="w-4 h-4 text-muted-foreground" />
+                      Enlace de invitación
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        readOnly
+                        value={repResult.inviteUrl}
+                        className="text-xs font-mono"
+                        onClick={(e) => (e.target as HTMLInputElement).select()}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(repResult.inviteUrl)
+                            toast.success('Enlace copiado')
+                          } catch {
+                            toast.error('No se pudo copiar')
+                          }
+                        }}
+                        className="shrink-0"
+                        aria-label="Copiar enlace"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Expira en {repResult.expiresAtDays} días. Al abrirlo, el representante
+                      elige su propia contraseña.
+                    </p>
+                  </div>
+
+                  {repResult.whatsappUrl ? (
+                    <div className="space-y-2">
+                      <Label>WhatsApp</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Número: +{repResult.whatsappNumber}
+                      </p>
+                      <a
+                        href={repResult.whatsappUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 w-full rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 transition-colors"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        Enviar por WhatsApp
+                        <ExternalLink className="w-3 h-3 opacity-80" />
+                      </a>
+                      <details className="mt-1">
+                        <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                          Ver mensaje
+                        </summary>
+                        <p className="mt-2 p-3 rounded-md bg-muted text-xs whitespace-pre-wrap">
+                          {repResult.inviteMessage}
+                        </p>
+                      </details>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-3">
+                      <p className="text-sm text-amber-800 dark:text-amber-400">
+                        Sin WhatsApp: no se configuró un número válido.
+                      </p>
+                      <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
+                        Copia el enlace de invitación y envíalo manualmente, o comparte la
+                        cédula y contraseña temporal.
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-3">
+                  <p className="text-sm text-amber-800 dark:text-amber-400">
+                    No se pudo generar el enlace de invitación automáticamente.
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
+                    Comparte la cédula y contraseña temporal manualmente.
+                  </p>
+                </div>
+              )}
+
+              <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground mb-1">¿Cómo funciona?</p>
+                <ol className="list-decimal list-inside space-y-0.5">
+                  <li>Envía el enlace por WhatsApp (o cópialo y compártelo).</li>
+                  <li>Al abrirlo, el representante verá su nombre y elegirá su contraseña.</li>
+                  <li>Tras completar el registro, inicia sesión normalmente.</li>
+                </ol>
+              </div>
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setRepResult(null)
+                    setRepForm(emptyRepForm())
+                  }}
+                >
+                  Crear otro
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => setRepDialogOpen(false)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  Cerrar
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <form onSubmit={handleCreateRepresentante} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="rep-cedula">Cédula *</Label>
+                <div className="flex gap-2">
+                  <Select
+                    value={repForm.cedulaPrefix}
+                    onValueChange={(v) => setRepForm({ ...repForm, cedulaPrefix: v })}
+                  >
+                    <SelectTrigger className="w-20">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="V-">V-</SelectItem>
+                      <SelectItem value="E-">E-</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    id="rep-cedula"
+                    type="text"
+                    placeholder="00000000"
+                    value={repForm.cedula}
+                    onChange={(e) =>
+                      setRepForm({ ...repForm, cedula: e.target.value.replace(/\D/g, '') })
+                    }
+                    required
+                    className="flex-1"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="rep-nombre">Nombre *</Label>
+                  <Input
+                    id="rep-nombre"
+                    value={repForm.nombre}
+                    onChange={(e) => setRepForm({ ...repForm, nombre: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rep-apellido">Apellido *</Label>
+                  <Input
+                    id="rep-apellido"
+                    value={repForm.apellido}
+                    onChange={(e) => setRepForm({ ...repForm, apellido: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="rep-email">Email (opcional)</Label>
+                <Input
+                  id="rep-email"
+                  type="email"
+                  placeholder="correo@ejemplo.com"
+                  value={repForm.email}
+                  onChange={(e) => setRepForm({ ...repForm, email: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="rep-telefono">Teléfono</Label>
+                  <Input
+                    id="rep-telefono"
+                    placeholder="0412-0000000"
+                    value={repForm.telefono}
+                    onChange={(e) => setRepForm({ ...repForm, telefono: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="rep-whatsapp">WhatsApp</Label>
+                  <Input
+                    id="rep-whatsapp"
+                    placeholder="584120000000"
+                    value={repForm.whatsapp}
+                    onChange={(e) =>
+                      setRepForm({ ...repForm, whatsapp: e.target.value.replace(/[^0-9]/g, '') })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="rep-password">Contraseña temporal *</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="rep-password"
+                    value={repForm.password}
+                    onChange={(e) => setRepForm({ ...repForm, password: e.target.value })}
+                    required
+                    minLength={6}
+                    className="font-mono"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={regenerateRepPassword}
+                    className="shrink-0"
+                    aria-label="Regenerar contraseña"
+                    title="Generar nueva contraseña"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={copyRepPassword}
+                    className="shrink-0"
+                    aria-label="Copiar contraseña"
+                  >
+                    {repCopied ? (
+                      <Check className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Se generó automáticamente. Puedes regenerarla o editarla.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setRepDialogOpen(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={repSubmitting}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  {repSubmitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  <UserPlus className="w-4 h-4 mr-1" />
+                  Crear y generar link de invitación
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Delete confirmation */}
       <AlertDialog
         open={!!deleteTarget}
@@ -543,6 +1118,135 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Invitation Dialog */}
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="w-5 h-5 text-emerald-600" />
+              Invitación por WhatsApp
+            </DialogTitle>
+            <DialogDescription>
+              Comparte este enlace con{' '}
+              <strong className="text-foreground">
+                {inviteTarget?.nombre} {inviteTarget?.apellido}
+              </strong>{' '}
+              para que establezca su propia contraseña.
+            </DialogDescription>
+          </DialogHeader>
+
+          {inviteLoading && (
+            <div className="flex flex-col items-center gap-3 py-10">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+              <p className="text-sm text-muted-foreground">Generando invitación...</p>
+            </div>
+          )}
+
+          {inviteData && (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 p-3">
+                <p className="text-sm text-emerald-900 dark:text-emerald-200">
+                  ✓ Enlace generado correctamente.
+                </p>
+                <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">
+                  Expira en {inviteData.expiresAtDays} días.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Enlace de invitación</Label>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={inviteData.url}
+                    className="text-xs font-mono"
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleCopyLink}
+                    className="shrink-0"
+                  >
+                    {copied ? (
+                      <Check className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {inviteData.whatsappUrl ? (
+                <div className="space-y-2">
+                  <Label>WhatsApp</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Número: +{inviteData.whatsappNumber}
+                  </p>
+                  <a
+                    href={inviteData.whatsappUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 w-full rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    Abrir WhatsApp
+                    <ExternalLink className="w-3 h-3 opacity-80" />
+                  </a>
+                  <details className="mt-2">
+                    <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                      Ver mensaje
+                    </summary>
+                    <p className="mt-2 p-3 rounded-md bg-muted text-xs whitespace-pre-wrap">
+                      {inviteData.message}
+                    </p>
+                  </details>
+                </div>
+              ) : (
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 p-3">
+                  <p className="text-sm text-amber-800 dark:text-amber-400">
+                    Este representante no tiene un número de WhatsApp configurado.
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
+                    Edita el usuario para añadir su WhatsApp, o copia y envía el enlace
+                    manualmente.
+                  </p>
+                </div>
+              )}
+
+              <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground mb-1">¿Cómo funciona?</p>
+                <ol className="list-decimal list-inside space-y-0.5">
+                  <li>Envía el enlace al representante por WhatsApp o copiándolo.</li>
+                  <li>Al abrirlo, el representante verá su nombre y deberá elegir una contraseña.</li>
+                  <li>Tras completar el registro, podrá iniciar sesión normalmente.</li>
+                </ol>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setInviteOpen(false)}
+            >
+              Cerrar
+            </Button>
+            {inviteData && inviteTarget && (
+              <Button
+                type="button"
+                onClick={() => openInvite(inviteTarget)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <RefreshCw className="w-4 h-4 mr-1" />
+                Generar nuevo enlace
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

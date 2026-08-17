@@ -2,7 +2,7 @@
   "name": "Lista — Sistema de Asistencia Escolar",
   "short_name": "Lista",
   "description": "Control de asistencia y notificaciones escolares",
-  "start_url": "/",
+  "start_url": "/?v=2",
   "display": "standalone",
   "background_color": "#0d9488",
   "theme_color": "#10b981",

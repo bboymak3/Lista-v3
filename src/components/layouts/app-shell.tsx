@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useAuthStore, type Role } from '@/stores/auth-store'
 import { useViewStore } from '@/stores/view-store'
 import { usePushNotifications } from '@/hooks/use-push-notifications'
+import { UpdatePrompt } from '@/components/shared/update-prompt'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -59,6 +60,7 @@ import { SectionsManager } from '@/components/direccion/sections-manager'
 import { PlantelConfig } from '@/components/direccion/plantel-config'
 import { UsersManager } from '@/components/direccion/users-manager'
 import { SendPdf } from '@/components/direccion/send-pdf'
+import { RepresentanteStudents } from '@/components/direccion/representante-students'
 
 // Representante views
 import { RepresentanteDashboard } from '@/components/representante/representante-dashboard'
@@ -90,6 +92,7 @@ const navByRole: Record<Role, NavItem[]> = {
     { id: 'professors', label: 'Profesores', icon: Users, view: 'admin-professors' },
     { id: 'plantel', label: 'Geocerca', icon: MapPin, view: 'admin-plantel' },
     { id: 'send-pdf', label: 'Enviar PDF', icon: FileText, view: 'admin-send-pdf' },
+    { id: 'representante-students', label: 'Asignar Representantes', icon: Users, view: 'admin-representante-students' },
     { id: 'users', label: 'Usuarios', icon: UserCircle, view: 'admin-users' },
   ],
   profesor: [
@@ -377,6 +380,9 @@ export function AppShell() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Prompt de actualización de versión */}
+      <UpdatePrompt />
     </div>
   )
 }
@@ -401,6 +407,8 @@ function ViewRenderer({ view }: { view: string }) {
         return <PlantelConfig />
       case 'admin-send-pdf':
         return <SendPdf />
+      case 'admin-representante-students':
+        return <RepresentanteStudents />
       case 'admin-users':
         return <UsersManager />
       default:

@@ -40,9 +40,27 @@ model User {
   pushSubscriptions      PushSubscription[]
   attendanceMarked       Attendance[]         @relation("AttendanceMarker")
   justificationsCreated  Justification[]      @relation("JustificationRepresentante")
+  invitations            InvitationToken[]
 
   @@index([rol, activo])
   @@map("v3_users")
+}
+
+// ============================================
+// INVITATION TOKENS (representante set own password)
+// ============================================
+
+model InvitationToken {
+  id          String   @id @default(cuid())
+  token       String   @unique
+  userId      String   // the representante user
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  used        Boolean  @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([token, used])
+  @@map("v3_invitation_tokens")
 }
 
 // ============================================
