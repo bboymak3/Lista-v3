@@ -7,6 +7,16 @@ import { usePushNotifications } from '@/hooks/use-push-notifications'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Sheet,
   SheetContent,
   SheetTrigger,
@@ -200,9 +210,40 @@ export function AppShell() {
   const activeView = useViewStore((s) => s.activeView)
   const setActiveView = useViewStore((s) => s.setActiveView)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   // Registrar push notifications (Android)
   usePushNotifications()
+
+  // Handle back button: si está en una vista que no es dashboard, volver al dashboard
+  // en lugar de salir de la app (fix bug doble click)
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      // Prevenir el comportamiento por defecto de salir de la app
+      e.preventDefault()
+      if (activeView !== 'dashboard' && !activeView.endsWith('-dashboard')) {
+        // Volver al dashboard en vez de salir
+        const initial: Record<Role, string> = {
+          admin: 'admin-dashboard',
+          profesor: 'profesor-dashboard',
+          representante: 'representante-dashboard',
+          alumno: 'alumno-dashboard',
+        }
+        if (user) {
+          setActiveView(initial[user.rol])
+          // Restaurar el historial sin añadir entrada nueva
+          window.history.pushState(null, '', window.location.href)
+        }
+      } else {
+        // Si ya está en dashboard, permitir salir (pushState para que no salga sin confirmar)
+        window.history.pushState(null, '', window.location.href)
+      }
+    }
+    // Inicializar historial para capturar el back button
+    window.history.pushState(null, '', window.location.href)
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [activeView, user, setActiveView])
 
   // Initialize active view based on role once user is loaded
   useEffect(() => {
@@ -224,7 +265,12 @@ export function AppShell() {
   const activeItem = navItems.find((i) => i.view === activeView) || navItems[0]
 
   const handleLogout = () => {
+    setShowLogoutConfirm(true)
+  }
+
+  const confirmLogout = () => {
     logout()
+    setShowLogoutConfirm(false)
     toast.success('Sesión cerrada')
   }
 
@@ -304,6 +350,27 @@ export function AppShell() {
           </div>
         </main>
       </div>
+
+      {/* Confirmación de logout */}
+      <AlertDialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Cerrar sesión?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vas a salir de tu cuenta. Tendrás que iniciar sesión nuevamente para acceder al sistema.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>No, quedarme</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmLogout}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Sí, cerrar sesión
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

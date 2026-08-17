@@ -12,489 +12,252 @@ import {
   CheckCircle2,
   AlertTriangle,
   Navigation,
-  History,
   Crosshair,
   Clock,
-  LogIn,
   Satellite,
   Ruler,
+  Info,
 } from 'lucide-react'
 
-interface AsistenciaHoy {
-  id: string
-  estado: string
-  origen: string
-  lat: number | null
-  lng: number | null
-  fecha: string
-  sessionId: string | null
-}
-
 interface PlantelData {
-  id: string
   nombre: string
   lat: number
   lng: number
   radioM: number
 }
 
+interface LastPing {
+  lat: number
+  lng: number
+  timestamp: string
+}
+
 interface CheckinStatus {
-  hoy: AsistenciaHoy | null
   plantel: PlantelData
+  lastPing: LastPing | null
 }
 
-interface AttendanceRecord {
-  id: string
-  estado: string
-  origen: string
-  observacion: string | null
-  fecha: string
-  lat: number | null
-  lng: number | null
-  session: { id: string; estado: string; fecha: string } | null
-}
-
-interface FueraRangoResponse {
-  error: string
+interface CheckinResponse {
+  ok: boolean
+  message: string
+  dentroGeocerca: boolean
   distancia: number
   radioPermitido: number
-  plantelNombre?: string
-}
-
-function formatTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString('es-VE', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    })
-  } catch {
-    return '--:--'
-  }
-}
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString('es-VE', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-    })
-  } catch {
-    return ''
-  }
-}
-
-const estadoConfig: Record<
-  string,
-  { label: string; badge: string; icon: React.ReactNode }
-> = {
-  presente: {
-    label: 'Presente',
-    badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
-    icon: <CheckCircle2 className="w-4 h-4" />,
-  },
-  ausente: {
-    label: 'Ausente',
-    badge: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300',
-    icon: <AlertTriangle className="w-4 h-4" />,
-  },
-  tardanza: {
-    label: 'Tardanza',
-    badge: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
-    icon: <Clock className="w-4 h-4" />,
-  },
-  justificado: {
-    label: 'Justificado',
-    badge: 'bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300',
-    icon: <CheckCircle2 className="w-4 h-4" />,
-  },
+  plantelNombre: string
+  timestamp: string
 }
 
 export function AlumnoCheckin() {
-  const [data, setData] = useState<CheckinStatus | null>(null)
-  const [history, setHistory] = useState<AttendanceRecord[]>([])
+  const [status, setStatus] = useState<CheckinStatus | null>(null)
   const [loading, setLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState(false)
-  const [lastCoords, setLastCoords] = useState<{
-    lat: number
-    lng: number
-    acc: number
-  } | null>(null)
-  const [fueraRango, setFueraRango] = useState<FueraRangoResponse | null>(null)
+  const [reporting, setReporting] = useState(false)
+  const [lastReport, setLastReport] = useState<CheckinResponse | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const loadStatus = useCallback(async () => {
     try {
-      const [status, hist] = await Promise.all([
-        api.get<CheckinStatus>('/alumno/checkin'),
-        api.get<{ historial: AttendanceRecord[] }>('/alumno/attendance'),
-      ])
-      setData(status)
-      setHistory(hist.historial.slice(0, 7))
-    } catch (e: unknown) {
-      toast.error('Error: ' + (e as Error).message)
+      const data = await api.get<CheckinStatus>('/alumno/checkin')
+      setStatus(data)
+    } catch (err: any) {
+      toast.error(err.message || 'Error al cargar estado')
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    load()
-  }, [load])
+    loadStatus()
+  }, [loadStatus])
 
-  const getPosition = (): Promise<{ lat: number; lng: number; acc: number }> => {
-    return new Promise((resolve, reject) => {
-      if (!('geolocation' in navigator)) {
-        reject(new Error('Geolocalización no disponible en este dispositivo'))
-        return
-      }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          resolve({
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            acc: pos.coords.accuracy,
-          })
-        },
-        (err) => {
-          const msgs: Record<number, string> = {
-            1: 'Permiso de ubicación denegado. Activa el GPS en tu navegador.',
-            2: 'Ubicación no disponible. Verifica que el GPS esté activado.',
-            3: 'Tiempo de espera agotado. Intenta de nuevo.',
-          }
-          reject(new Error(msgs[err.code] || err.message))
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-      )
-    })
-  }
-
-  const handleCheckin = async () => {
-    setActionLoading(true)
-    setFueraRango(null)
-    let coords: { lat: number; lng: number; acc: number } | null = null
-
-    try {
-      coords = await getPosition()
-      setLastCoords(coords)
-    } catch (e: unknown) {
-      toast.error('No se pudo obtener tu ubicación: ' + (e as Error).message)
-      setActionLoading(false)
+  const handleReportLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error('Tu dispositivo no soporta geolocalización')
       return
     }
 
-    // Hacemos fetch directo para poder leer el body del 403
-    try {
-      const token = (await import('@/stores/auth-store')).useAuthStore.getState().token
-      const res = await fetch('/api/alumno/checkin', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ lat: coords.lat, lng: coords.lng }),
-      })
-
-      const data2 = await res.json().catch(() => ({}))
-
-      if (res.status === 403 && data2.error === 'Fuera del rango del plantel') {
-        setFueraRango({
-          error: data2.error,
-          distancia: data2.distancia,
-          radioPermitido: data2.radioPermitido,
-          plantelNombre: data2.plantelNombre,
-        })
-        toast.error(
-          `Estás a ${data2.distancia}m del plantel (permitido: ${data2.radioPermitido}m)`
-        )
-      } else if (!res.ok) {
-        toast.error(data2.error || 'Error al registrar check-in')
-      } else {
-        if (data2.yaExistente) {
-          toast.info('Ya tenías un check-in registrado hoy')
-        } else {
-          toast.success('¡Check-in registrado: Presente! 🎉')
+    setReporting(true)
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude: lat, longitude: lng } = position.coords
+        try {
+          const data = await api.post<CheckinResponse>('/alumno/checkin', { lat, lng })
+          setLastReport(data)
+          if (data.dentroGeocerca) {
+            toast.success('Ubicación reportada — estás dentro del plantel')
+          } else {
+            toast.warning(`Estás a ${data.distancia}m del plantel`)
+          }
+          loadStatus()
+        } catch (err: any) {
+          toast.error(err.message || 'Error al reportar ubicación')
+        } finally {
+          setReporting(false)
         }
-        await load()
-      }
-    } catch (e: unknown) {
-      toast.error('Error de red: ' + (e as Error).message)
-    } finally {
-      setActionLoading(false)
-    }
+      },
+      (error) => {
+        setReporting(false)
+        if (error.code === error.PERMISSION_DENIED) {
+          toast.error('Permiso de ubicación denegado. Actívalo en tu navegador.')
+        } else if (error.code === error.TIMEOUT) {
+          toast.error('Tiempo agotado obteniendo ubicación. Intenta de nuevo.')
+        } else {
+          toast.error('No se pudo obtener tu ubicación')
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    )
   }
 
-  const hoy = data?.hoy
-  const presente = hoy?.estado === 'presente'
-  const plantel = data?.plantel
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-24 w-full" />
+      </div>
+    )
+  }
+
+  if (!status) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-muted-foreground">
+          No se pudo cargar la información del plantel.
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const { plantel, lastPing } = status
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold flex items-center gap-2">
-          <MapPin className="w-6 h-6 text-emerald-600" />
-          Mi Check-in
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {new Date().toLocaleDateString('es-VE', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-          })}
-        </p>
-      </div>
-
-      {/* Status Card */}
-      <Card
-        className={
-          presente
-            ? 'border-emerald-300 dark:border-emerald-800'
-            : 'border-amber-300 dark:border-amber-800'
-        }
-      >
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Estado de hoy</span>
-            {presente ? (
-              <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                <CheckCircle2 className="w-3 h-3 mr-1" />
-                Presente
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="border-amber-500 text-amber-700">
-                <AlertTriangle className="w-3 h-3 mr-1" />
-                Sin registro
-              </Badge>
-            )}
-          </CardTitle>
-          <CardDescription>
-            {presente
-              ? `Registraste tu entrada a las ${formatTime(hoy!.fecha)}`
-              : 'No has registrado entrada hoy'}
-            {plantel && ` · Plantel: ${plantel.nombre}`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <Skeleton className="h-20 w-full" />
-          ) : presente ? (
-            <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-4 flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center text-white shrink-0">
-                <CheckCircle2 className="w-7 h-7" />
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300">
-                  Presente desde las {formatTime(hoy!.fecha)}
-                </p>
-                {hoy!.lat != null && hoy!.lng != null && (
-                  <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                    <Crosshair className="w-3 h-3" />
-                    {hoy!.lat.toFixed(5)}, {hoy!.lng.toFixed(5)} ·{' '}
-                    <span className="capitalize">origen: {hoy!.origen.replace('_', ' ')}</span>
-                  </p>
-                )}
-              </div>
+    <div className="space-y-6 max-w-2xl mx-auto">
+      {/* Aviso informativo */}
+      <Card className="border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20">
+        <CardContent className="pt-6">
+          <div className="flex gap-3">
+            <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+            <div className="text-sm text-blue-700 dark:text-blue-300">
+              <p className="font-semibold mb-1">Información importante</p>
+              <p>
+                El registro de asistencia lo realiza tu profesor. Esta función es{' '}
+                <strong>solo informativa</strong>: permite a tu representante ver tu última
+                ubicación conocida. No reemplaza el control de asistencia del profesor.
+              </p>
             </div>
-          ) : (
-            <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4 flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-amber-500 flex items-center justify-center text-white shrink-0">
-                <Clock className="w-7 h-7" />
-              </div>
-              <div>
-                <p className="text-xl font-bold text-amber-700 dark:text-amber-300">
-                  No has registrado entrada hoy
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Acércate al plantel y presiona el botón para registrar tu llegada.
-                </p>
-              </div>
-            </div>
-          )}
+          </div>
         </CardContent>
       </Card>
 
-      {/* Big Action Button */}
-      <Button
-        onClick={handleCheckin}
-        disabled={actionLoading || presente}
-        size="lg"
-        className="w-full h-auto py-8 flex flex-col items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-60"
-      >
-        {actionLoading ? (
-          <Navigation className="w-10 h-10 animate-pulse" />
-        ) : (
-          <LogIn className="w-10 h-10" />
-        )}
-        <div>
-          <div className="text-lg font-bold">
-            {presente
-              ? 'Entrada registrada'
-              : actionLoading
-              ? 'Obteniendo ubicación…'
-              : 'Registrar Entrada'}
-          </div>
-          <div className="text-xs text-emerald-100">
-            {presente
-              ? formatTime(hoy!.fecha)
-              : 'Usaremos tu GPS para verificar que estás en el plantel'}
-          </div>
-        </div>
-      </Button>
-
-      {/* Coordinates / GPS info */}
-      {lastCoords && (
-        <Card className="border-emerald-200 dark:border-emerald-900/50">
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-3">
-              <Satellite className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-              <div className="text-sm">
-                <p className="font-medium">Última ubicación capturada</p>
-                <p className="text-muted-foreground mt-1">
-                  Lat: {lastCoords.lat.toFixed(6)}, Lng: {lastCoords.lng.toFixed(6)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                  <Ruler className="w-3 h-3" />
-                  Precisión: ±{lastCoords.acc.toFixed(0)} metros
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Out of range visualization */}
-      {fueraRango && (
-        <Card className="border-red-300 dark:border-red-900/60">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-700 dark:text-red-400">
-              <AlertTriangle className="w-5 h-5" />
-              Fuera del rango del plantel
-            </CardTitle>
-            <CardDescription>
-              {fueraRango.plantelNombre
-                ? `Estás demasiado lejos de "${fueraRango.plantelNombre}".`
-                : 'Estás demasiado lejos del plantel.'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {/* Map-like visual */}
-            <div className="relative h-44 rounded-lg overflow-hidden border bg-muted/30">
-              <div className="absolute inset-0 grid grid-cols-8 grid-rows-6 opacity-30">
-                {Array.from({ length: 48 }).map((_, i) => (
-                  <div key={i} className="border border-emerald-200 dark:border-emerald-900" />
-                ))}
-              </div>
-              {/* Plantel en el centro */}
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-                <div className="relative">
-                  <div
-                    className="rounded-full border-2 border-emerald-500/60 bg-emerald-500/10"
-                    style={{
-                      width: `${Math.min(140, (fueraRango.radioPermitido / Math.max(fueraRango.distancia, fueraRango.radioPermitido)) * 140)}px`,
-                      height: `${Math.min(140, (fueraRango.radioPermitido / Math.max(fueraRango.distancia, fueraRango.radioPermitido)) * 140)}px`,
-                    }}
-                  />
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center">
-                    <MapPin className="w-4 h-4" />
-                  </div>
-                </div>
-                <span className="text-[10px] text-muted-foreground mt-1 font-medium">
-                  Plantel · {fueraRango.radioPermitido}m
-                </span>
-              </div>
-              {/* Tu ubicación (fuera) */}
-              <div
-                className="absolute top-1/2 right-4 -translate-y-1/2 flex flex-col items-center"
-                style={{ marginTop: '-30px' }}
-              >
-                <div className="w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center animate-pulse">
-                  <Crosshair className="w-3 h-3" />
-                </div>
-                <span className="text-[10px] text-muted-foreground mt-1 font-medium">
-                  Tú · {fueraRango.distancia}m
-                </span>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <div className="rounded-md bg-red-50 dark:bg-red-950/30 p-3 text-center">
-                <p className="text-xs text-muted-foreground uppercase">Tu distancia</p>
-                <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                  {fueraRango.distancia}m
-                </p>
-              </div>
-              <div className="rounded-md bg-emerald-50 dark:bg-emerald-950/30 p-3 text-center">
-                <p className="text-xs text-muted-foreground uppercase">Permitido</p>
-                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                  {fueraRango.radioPermitido}m
-                </p>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mt-3 text-center">
-              Acércate al plantel para poder registrar tu entrada.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* History 7 days */}
+      {/* Estado actual */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <History className="w-4 h-4 text-muted-foreground" />
-            Últimos 7 días
+          <CardTitle className="flex items-center gap-2">
+            <MapPin className="w-5 h-5 text-emerald-600" />
+            Mi ubicación
           </CardTitle>
+          <CardDescription>
+            Reporta tu ubicación para que tu representante pueda verte en el mapa
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : history.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Clock className="w-10 h-10 mx-auto mb-2 opacity-50" />
-              <p>No hay registros recientes</p>
+        <CardContent className="space-y-4">
+          {/* Última ubicación */}
+          {lastPing ? (
+            <div className="rounded-lg border bg-card p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span className="font-medium text-sm">Última ubicación reportada</span>
+              </div>
+              <p className="text-xs text-muted-foreground font-mono">
+                {lastPing.lat.toFixed(5)}, {lastPing.lng.toFixed(5)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {new Date(lastPing.timestamp).toLocaleString('es-VE', {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}
+              </p>
             </div>
           ) : (
-            <ul className="space-y-1 max-h-96 overflow-y-auto">
-              {history.map((r) => {
-                const cfg = estadoConfig[r.estado] || estadoConfig.presente
-                return (
-                  <li
-                    key={r.id}
-                    className="flex items-center gap-3 p-2.5 rounded-md hover:bg-accent/50 transition-colors"
-                  >
-                    <div
-                      className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${cfg.badge}`}
-                    >
-                      {cfg.icon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium capitalize">
-                        {cfg.label} · {formatDate(r.fecha)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatTime(r.fecha)} ·{' '}
-                        <span className="capitalize">
-                          {r.origen.replace('_', ' ')}
-                        </span>
-                      </p>
-                    </div>
-                    {r.lat != null && r.lng != null && (
-                      <span className="text-xs text-muted-foreground hidden sm:block">
-                        {r.lat.toFixed(4)}, {r.lng.toFixed(4)}
-                      </span>
-                    )}
-                  </li>
-                )
-              })}
-            </ul>
+            <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+              <Crosshair className="w-8 h-8 mx-auto mb-2 opacity-40" />
+              Aún no has reportado tu ubicación hoy
+            </div>
           )}
+
+          {/* Último reporte */}
+          {lastReport && (
+            <div
+              className={`rounded-lg p-3 text-sm ${
+                lastReport.dentroGeocerca
+                  ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {lastReport.dentroGeocerca ? (
+                  <CheckCircle2 className="w-4 h-4" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4" />
+                )}
+                <span className="font-medium">{lastReport.message}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Botón reportar */}
+          <Button
+            onClick={handleReportLocation}
+            disabled={reporting}
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+            size="lg"
+          >
+            {reporting ? (
+              <>
+                <Navigation className="w-5 h-5 mr-2 animate-pulse" />
+                Obteniendo ubicación...
+              </>
+            ) : (
+              <>
+                <Crosshair className="w-5 h-5 mr-2" />
+                Reportar mi ubicación
+              </>
+            )}
+          </Button>
         </CardContent>
       </Card>
+
+      {/* Info del plantel */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Satellite className="w-4 h-4 text-emerald-600" />
+            Plantel: {plantel.nombre}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground flex items-center gap-1.5">
+              <Ruler className="w-3.5 h-3.5" /> Radio permitido
+            </span>
+            <Badge variant="secondary">{plantel.radioM}m</Badge>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5" /> Ubicación
+            </span>
+            <span className="font-mono text-xs">
+              {plantel.lat.toFixed(4)}, {plantel.lng.toFixed(4)}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Nota final */}
+      <div className="text-center text-xs text-muted-foreground px-4">
+        <Clock className="w-3.5 h-3.5 inline mr-1" />
+        La ubicación se actualiza solo cuando presionas el botón.
+        <br />
+        El profesor lleva el control oficial de tu asistencia.
+      </div>
     </div>
   )
 }

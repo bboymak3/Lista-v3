@@ -53,8 +53,8 @@ interface AsistenciaHoy {
 }
 
 interface CheckinStatus {
-  hoy: AsistenciaHoy | null
-  plantel: { id: string; nombre: string; radioM: number }
+  plantel: { nombre: string; radioM: number }
+  lastPing: { lat: number; lng: number; timestamp: string } | null
 }
 
 interface NotificationCount {
@@ -121,7 +121,7 @@ export function AlumnoDashboard() {
     }
   }, [])
 
-  const presente = checkin?.hoy?.estado === 'presente'
+  const ubicacionReportada = !!checkin?.lastPing
 
   return (
     <div className="space-y-6">
@@ -159,7 +159,7 @@ export function AlumnoDashboard() {
       {/* Today's status card */}
       <Card
         className={
-          presente
+          ubicacionReportada
             ? 'border-emerald-300 dark:border-emerald-800'
             : 'border-amber-300 dark:border-amber-800'
         }
@@ -168,28 +168,28 @@ export function AlumnoDashboard() {
           <CardTitle className="flex items-center justify-between">
             <span className="flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-              Estado de hoy
+              Mi ubicación
             </span>
-            {presente ? (
+            {ubicacionReportada ? (
               <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                Presente
+                Reportada
               </Badge>
             ) : (
               <Badge variant="outline" className="border-amber-500 text-amber-700">
-                No registrado
+                Sin reportar
               </Badge>
             )}
           </CardTitle>
           <CardDescription>
-            {presente
-              ? `Registraste tu entrada a las ${formatTime(checkin!.hoy!.fecha)}`
-              : 'Aún no has registrado tu entrada hoy'}
+            {ubicacionReportada
+              ? `Última ubicación: ${formatTime(checkin!.lastPing!.timestamp)}`
+              : 'Aún no has reportado tu ubicación hoy'}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
             <Skeleton className="h-16 w-full" />
-          ) : presente ? (
+          ) : ubicacionReportada ? (
             <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 p-4 flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-emerald-500 flex items-center justify-center text-white shrink-0">
                 <CheckCircle2 className="w-6 h-6" />
@@ -210,10 +210,10 @@ export function AlumnoDashboard() {
               </div>
               <div>
                 <p className="font-bold text-amber-700 dark:text-amber-300">
-                  Recuerda registrar tu entrada
+                  Reporta tu ubicación cuando estés en el plantel
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Acércate al plantel y haz check-in desde tu celular.
+                  Acércate al plantel y reporta tu ubicación.
                 </p>
               </div>
             </div>
@@ -222,7 +222,7 @@ export function AlumnoDashboard() {
       </Card>
 
       {/* Quick action */}
-      {!presente && (
+      {!ubicacionReportada && (
         <Button
           onClick={() => setActiveView('alumno-checkin')}
           size="lg"
@@ -230,8 +230,8 @@ export function AlumnoDashboard() {
         >
           <MapPin className="w-6 h-6" />
           <div className="text-left">
-            <div className="text-lg font-bold">Hacer Check-in</div>
-            <div className="text-xs text-emerald-100">Registra tu entrada con GPS</div>
+            <div className="text-lg font-bold">Reportar Ubicación</div>
+            <div className="text-xs text-emerald-100">Comparte tu ubicación con tu representante</div>
           </div>
         </Button>
       )}
@@ -256,9 +256,9 @@ export function AlumnoDashboard() {
 
           <Button
             onClick={() => setActiveView('alumno-checkin')}
-            variant={presente ? 'secondary' : 'default'}
+            variant={ubicacionReportada ? 'secondary' : 'default'}
             className={`h-auto py-5 flex flex-col items-start gap-2 ${
-              presente
+              ubicacionReportada
                 ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300'
                 : 'bg-teal-600 hover:bg-teal-700 text-white'
             }`}
@@ -266,10 +266,10 @@ export function AlumnoDashboard() {
             <MapPin className="w-6 h-6" />
             <div className="text-left">
               <div className="font-semibold">
-                {presente ? 'Entrada registrada' : 'Check-in'}
+                {ubicacionReportada ? 'Reportada' : 'Check-in'}
               </div>
               <div className="text-xs opacity-80">
-                {presente ? formatTime(checkin!.hoy!.fecha) : 'Registrar mi llegada'}
+                {ubicacionReportada ? formatTime(checkin!.lastPing!.timestamp) : 'Reportar ubicación'}
               </div>
             </div>
           </Button>
@@ -312,14 +312,14 @@ export function AlumnoDashboard() {
             <p className="text-2xl font-bold mt-2">
               {loading ? (
                 <Skeleton className="h-7 w-20" />
-              ) : presente ? (
-                formatTime(checkin!.hoy!.fecha)
+              ) : ubicacionReportada ? (
+                formatTime(checkin!.lastPing!.timestamp)
               ) : (
                 '—'
               )}
             </p>
             <p className="text-xs text-muted-foreground">
-              {presente ? 'entrada' : 'sin entrada'}
+              {ubicacionReportada ? 'reportada' : 'sin reportar'}
             </p>
           </CardContent>
         </Card>
