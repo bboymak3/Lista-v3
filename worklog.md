@@ -422,3 +422,29 @@ Stage Summary:
 - 2 dependencias instaladas: pdf-lib, qrcode (+ @types/qrcode en dev).
 - Todos los endpoints probados con curl: 200 OK con PDF válido, 401/403/404 en casos no autorizados/inexistentes.
 - Compatible con Cloudflare Workers (isD1 + R2 bucket binding) y dev local (Prisma + filesystem).
+
+---
+Task ID: FINAL-VERIFY
+Agent: main
+Task: Verificación final de todas las features en producción
+
+Work Log:
+- Push a GitHub: commit 2c7260f → https://github.com/bboymak3/Lista-v3
+- Deploy a Cloudflare Workers: https://lista.activo.workers.dev
+- Verificación con Agent Browser de TODAS las features nuevas:
+  * Modo oscuro: toggle Sun/Moon funciona, clase 'dark' se aplica al <html>
+  * Confirmación de logout: diálogo "¿Cerrar sesión?" con "No, quedarme" / "Sí, cerrar sesión"
+  * Estudiantes admin: botones Editar, Generar Carnet PDF, Reporte Asistencia PDF, Eliminar
+  * Carnet PDF: endpoint responde 200, 8.2KB PDF generado
+  * Reporte mensual PDF: endpoint responde 200, 2.9KB PDF generado
+  * Justificaciones representante: vista funciona, muestra justificación creada
+  * Subida de foto de alumno: funciona, guarda mediaKey en D1
+  * Fix navegación atrás: implementado con popstate handler
+  * Check-in alumno solo visual: no crea asistencia, solo LocationPing
+
+Stage Summary:
+- TODAS las features solicitadas están implementadas y verificadas en producción
+- GitHub actualizado: https://github.com/bboymak3/Lista-v3
+- Cloudflare Worker: https://lista.activo.workers.dev
+- D1 database: lista_db (tablas v3_* no tocan originales)
+- 4 roles funcionando: admin, profesor, representante, alumno
