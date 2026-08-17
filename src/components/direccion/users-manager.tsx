@@ -682,7 +682,7 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
                   type="text"
                   placeholder="00000000"
                   value={form.cedula}
-                  onChange={(e) => setForm({ ...form, cedula: e.target.value.replace(/\D/g, '') })}
+                  onChange={(e) => setForm({ ...form, cedula: e.target.value.replace(/[^a-zA-Z0-9]/g, '') })}
                   required
                   className="flex-1"
                 />
@@ -973,7 +973,7 @@ export function UsersManager({ defaultRole = 'profesor' as RolKey }: { defaultRo
                     placeholder="00000000"
                     value={repForm.cedula}
                     onChange={(e) =>
-                      setRepForm({ ...repForm, cedula: e.target.value.replace(/\D/g, '') })
+                      setRepForm({ ...repForm, cedula: e.target.value.replace(/[^a-zA-Z0-9]/g, '') })
                     }
                     required
                     className="flex-1"

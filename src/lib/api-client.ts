@@ -9,8 +9,10 @@ export async function apiFetch<T = any>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = useAuthStore.getState().token
+  const isFormData = options.body instanceof FormData
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    // Solo poner Content-Type JSON si no es FormData
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...((options.headers as Record<string, string>) || {}),
   }
 

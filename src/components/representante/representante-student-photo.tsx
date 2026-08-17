@@ -1,8 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { apiFetch } from '@/lib/api-client'
-import { useAuthStore } from '@/stores/auth-store'
+import { api } from '@/lib/api-client'
 import { useRepresentanteStore } from '@/stores/representante-store'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -11,21 +10,13 @@ import { toast } from 'sonner'
 import { Camera, RefreshCw, Upload } from 'lucide-react'
 
 interface RepresentanteStudentPhotoProps {
-  /** ID del estudiante (Child.id) */
   estudianteId: string
-  /** fotoKey actual del estudiante */
   fotoKey: string | null
-  /** Nombre + apellido para mostrar iniciales en el fallback */
   nombre: string
   apellido: string
-  /** Callback opcional para actualizar la UI del padre cuando se sube una foto */
   onPhotoChanged?: (newFotoKey: string) => void
 }
 
-/**
- * Permite al representante subir/cambiar la foto de perfil del estudiante (su hijo/a).
- * Usa el endpoint /api/alumno/photo (que ya valida ownership para representante).
- */
 export function RepresentanteStudentPhoto({
   estudianteId,
   fotoKey,
@@ -33,7 +24,6 @@ export function RepresentanteStudentPhoto({
   apellido,
   onPhotoChanged,
 }: RepresentanteStudentPhotoProps) {
-  const token = useAuthStore((s) => s.token)
   const fetchChildren = useRepresentanteStore((s) => s.fetchChildren)
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -56,17 +46,11 @@ export function RepresentanteStudentPhoto({
       const formData = new FormData()
       formData.append('file', file)
       formData.append('estudianteId', estudianteId)
-      const data = await apiFetch<{ mediaKey: string }>('/alumno/photo', {
-        method: 'POST',
-        body: formData,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
+      // Usar api.upload que maneja FormData correctamente
+      const data = await api.upload<{ mediaKey: string }>('/alumno/photo', formData)
       toast.success('Foto del alumno actualizada')
       onPhotoChanged?.(data.mediaKey)
-      // Refrescar la lista de hijos en el store para que se sincronice
-      fetchChildren(true).catch(() => {
-        /* ignore */
-      })
+      fetchChildren(true).catch(() => {})
     } catch (err: unknown) {
       toast.error('Error al subir foto: ' + (err as Error).message)
     } finally {
@@ -125,6 +109,7 @@ export function RepresentanteStudentPhoto({
               ref={fileInputRef}
               type="file"
               accept="image/*"
+              capture="user"
               className="hidden"
               onChange={handleUpload}
             />

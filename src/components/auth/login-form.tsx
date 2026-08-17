@@ -86,7 +86,7 @@ export function LoginForm() {
                     type="text"
                     placeholder="00000000"
                     value={cedula}
-                    onChange={(e) => setCedula(e.target.value.replace(/\D/g, ''))}
+                    onChange={(e) => setCedula(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
                     required
                     autoComplete="username"
                     className="flex-1"

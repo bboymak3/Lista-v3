@@ -308,45 +308,54 @@ export async function buildCarnetPdf(
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
   const fontOblique = await pdfDoc.embedFont(StandardFonts.HelveticaOblique)
 
-  // Página A6 portrait (en puntos PDF: 1 inch = 72 pt)
-  // 4.13" x 5.83" ≈ 297 x 420 pt
+  // Página A6 portrait: 4.13" x 5.83" ≈ 297 x 420 pt
   const PAGE_W = 297
   const PAGE_H = 420
   const HALF_H = PAGE_H / 2 // 210 pt — línea de pliegue
+  const MARGIN = 14
 
   const page = pdfDoc.addPage([PAGE_W, PAGE_H])
-
-  // ====== FRONTAL (mitad superior) ======
-  // Header con gradiente emulado (rectángulo emerald sólido)
-  page.drawRectangle({
-    x: 0,
-    y: PAGE_H - 110,
-    width: PAGE_W,
-    height: 110,
-    color: COLOR_EMERALD,
-  })
-  // Banda inferior del header
-  page.drawRectangle({
-    x: 0,
-    y: PAGE_H - 120,
-    width: PAGE_W,
-    height: 10,
-    color: COLOR_TEAL,
-  })
 
   const plantelNombre = data.plantel?.nombre || 'Plantel'
   const periodo = data.plantel?.periodoActual || data.section?.periodoEscolar || '2024-2025'
 
-  // === Logo del plantel (top-left del header) ===
-  // Si existe, se embebe dentro del header emerald. El texto "CARNET ESTUDIANTIL"
-  // se desplaza a la derecha del logo.
+  // ====================================================================
+  // FRONTAL (mitad superior) — Diseño moderno con header degradado
+  // ====================================================================
+
+  // Fondo blanco general
+  page.drawRectangle({
+    x: 0, y: HALF_H, width: PAGE_W, height: HALF_H,
+    color: COLOR_WHITE,
+  })
+
+  // Header con forma moderna: rectángulo emerald con banda teal inferior
+  const headerHeight = 95
+  const headerBottom = PAGE_H - headerHeight
+
+  // Degradado simulado: 3 bandas emerald de diferente intensidad
+  page.drawRectangle({
+    x: 0, y: headerBottom + 10, width: PAGE_W, height: headerHeight - 10,
+    color: COLOR_EMERALD_DARK,
+  })
+  page.drawRectangle({
+    x: 0, y: headerBottom, width: PAGE_W, height: 10,
+    color: COLOR_TEAL,
+  })
+
+  // Acento dorado/amarillo en la esquina superior derecha (bandera decorativa)
+  page.drawRectangle({
+    x: PAGE_W - 50, y: PAGE_H - 8, width: 50, height: 8,
+    color: rgb(0.95, 0.76, 0.21), // #f3c236
+  })
+
+  // === Logo del plantel ===
   const logoBuffer = data.plantel?.logoKey
     ? await fetchLogoBuffer(data.plantel.logoKey)
     : null
-  const logoSize = 70 // pt (tamaño fijo)
-  const logoX = 14
-  const logoY = PAGE_H - logoSize - 20 // 20pt de padding superior
-  let headerTextX = 16 // posición X por defecto del texto del header (sin logo)
+  const logoSize = 56
+  const logoX = MARGIN
+  const logoY = PAGE_H - logoSize - 16
 
   if (logoBuffer) {
     try {
@@ -354,82 +363,81 @@ export async function buildCarnetPdf(
         logoBuffer.format === 'png'
           ? await pdfDoc.embedPng(logoBuffer.bytes)
           : await pdfDoc.embedJpg(logoBuffer.bytes)
-      // Fondo blanco detrás del logo (mejor contraste sobre emerald)
+      // Círculo blanco detrás del logo (fondo para mejor contraste)
       page.drawRectangle({
-        x: logoX - 3,
-        y: logoY - 3,
-        width: logoSize + 6,
-        height: logoSize + 6,
+        x: logoX - 4, y: logoY - 4,
+        width: logoSize + 8, height: logoSize + 8,
         color: COLOR_WHITE,
       })
       page.drawImage(embedded, {
-        x: logoX,
-        y: logoY,
-        width: logoSize,
-        height: logoSize,
+        x: logoX, y: logoY, width: logoSize, height: logoSize,
       })
-      // Desplazar el texto del header a la derecha del logo
-      headerTextX = logoX + logoSize + 10
-    } catch {
-      // Si falla la incrustación, no usar logo y dejar texto en posición original
-    }
+    } catch { /* ignore */ }
+  } else {
+    // Si no hay logo, dibujar icono de graduación (circulo emerald con "L")
+    page.drawRectangle({
+      x: logoX, y: logoY, width: logoSize, height: logoSize,
+      color: COLOR_WHITE,
+    })
+    const gradIcon = 'L'
+    const gradW = fontBold.widthOfTextAtSize(gradIcon, 32)
+    page.drawText(gradIcon, {
+      x: logoX + (logoSize - gradW) / 2,
+      y: logoY + (logoSize - 32) / 2 + 4,
+      size: 32, font: fontBold, color: COLOR_EMERALD,
+    })
   }
 
-  // Título superior
-  page.drawText('CARNET ESTUDIANTIL', {
-    x: headerTextX,
-    y: PAGE_H - 24,
-    size: 9,
-    font: fontBold,
-    color: COLOR_WHITE,
+  // === Texto del header ===
+  const headerTextX = logoX + logoSize + 12
+
+  page.drawText('CARNET', {
+    x: headerTextX, y: PAGE_H - 22,
+    size: 13, font: fontBold, color: COLOR_WHITE,
   })
-  // Sistema
-  page.drawText('Sistema de Asistencia · Lista', {
-    x: headerTextX,
-    y: PAGE_H - 36,
-    size: 6.5,
-    font: fontOblique,
-    color: rgb(0.85, 0.95, 0.9),
+  page.drawText('ESTUDIANTIL', {
+    x: headerTextX, y: PAGE_H - 35,
+    size: 9, font: fontRegular, color: rgb(0.85, 0.95, 0.9),
   })
 
-  // Plantel nombre (lado derecho del header)
-  // Si hay logo, el plantel va a la derecha del logo (entre el header text y el borde derecho)
-  const plantelText = plantelNombre.length > 26 ? plantelNombre.slice(0, 25) + '…' : plantelNombre
-  const plantelWidth = fontBold.widthOfTextAtSize(plantelText, 10)
+  // Plantel nombre (alineado a la derecha del header)
+  const plantelText = plantelNombre.length > 22 ? plantelNombre.slice(0, 21) + '…' : plantelNombre
+  const plantelWidth = fontBold.widthOfTextAtSize(plantelText, 9)
   page.drawText(plantelText, {
-    x: PAGE_W - plantelWidth - 16,
-    y: PAGE_H - 22,
-    size: 10,
-    font: fontBold,
-    color: COLOR_WHITE,
+    x: PAGE_W - plantelWidth - MARGIN, y: PAGE_H - 22,
+    size: 9, font: fontBold, color: COLOR_WHITE,
   })
-  const periodoWidth = fontRegular.widthOfTextAtSize(periodo, 7.5)
+  const periodoWidth = fontRegular.widthOfTextAtSize(periodo, 7)
   page.drawText(periodo, {
-    x: PAGE_W - periodoWidth - 16,
-    y: PAGE_H - 34,
-    size: 7.5,
-    font: fontRegular,
-    color: rgb(0.85, 0.95, 0.9),
+    x: PAGE_W - periodoWidth - MARGIN, y: PAGE_H - 33,
+    size: 7, font: fontRegular, color: rgb(0.85, 0.95, 0.9),
   })
 
   // === Cuerpo del frontal ===
-  const bodyTop = PAGE_H - 120 // = 300
-  const bodyBottom = HALF_H + 4 // 214 (justo encima de la línea de pliegue)
-  const bodyHeight = bodyTop - bodyBottom // ~86pt
+  const bodyTop = headerBottom
+  const bodyBottom = HALF_H + 6
+  const bodyHeight = bodyTop - bodyBottom
 
-  // Fondo claro
+  // Fondo claro con sutil textura (solo un rectángulo claro)
   page.drawRectangle({
-    x: 0,
-    y: bodyBottom,
-    width: PAGE_W,
-    height: bodyHeight,
+    x: 0, y: bodyBottom, width: PAGE_W, height: bodyHeight,
     color: COLOR_LIGHT_EMERALD,
   })
 
-  // Foto del estudiante
-  const photoSize = 70 // pt
-  const photoX = 16
+  // === Foto del estudiante con marco circular moderno ===
+  const photoSize = 76
+  const photoX = MARGIN + 4
   const photoY = bodyBottom + (bodyHeight - photoSize) / 2
+
+  // Marco circular (simulado con rectángulo blanco + borde emerald)
+  page.drawRectangle({
+    x: photoX - 6, y: photoY - 6,
+    width: photoSize + 12, height: photoSize + 12,
+    color: COLOR_WHITE,
+    borderColor: COLOR_EMERALD,
+    borderWidth: 2,
+  })
+
   const photo = await fetchPhotoBuffer(data.fotoKey)
   if (photo) {
     try {
@@ -437,19 +445,8 @@ export async function buildCarnetPdf(
         photo.format === 'png'
           ? await pdfDoc.embedPng(photo.bytes)
           : await pdfDoc.embedJpg(photo.bytes)
-      // Mantener proporción (cuadrada)
-      page.drawRectangle({
-        x: photoX - 2,
-        y: photoY - 2,
-        width: photoSize + 4,
-        height: photoSize + 4,
-        color: COLOR_WHITE,
-      })
       page.drawImage(embedded, {
-        x: photoX,
-        y: photoY,
-        width: photoSize,
-        height: photoSize,
+        x: photoX, y: photoY, width: photoSize, height: photoSize,
       })
     } catch {
       drawInitialsBox(page, photoX, photoY, photoSize, data.nombre, data.apellido, fontBold, COLOR_EMERALD, COLOR_WHITE)
@@ -458,210 +455,207 @@ export async function buildCarnetPdf(
     drawInitialsBox(page, photoX, photoY, photoSize, data.nombre, data.apellido, fontBold, COLOR_EMERALD, COLOR_WHITE)
   }
 
-  // Nombre y datos (a la derecha de la foto)
-  const textX = photoX + photoSize + 14
-  const textW = PAGE_W - textX - 16
+  // === Información del estudiante (a la derecha de la foto) ===
+  const textX = photoX + photoSize + 18
+  const textW = PAGE_W - textX - MARGIN - 4
 
-  // Nombre
+  // Nombre completo (grande, ajusta tamaño si es largo)
   const nombreCompleto = `${data.nombre} ${data.apellido}`
-  let nombreSize = 14
-  while (fontBold.widthOfTextAtSize(nombreCompleto, nombreSize) > textW && nombreSize > 9) {
+  let nombreSize = 15
+  while (fontBold.widthOfTextAtSize(nombreCompleto, nombreSize) > textW && nombreSize > 10) {
     nombreSize -= 0.5
   }
   page.drawText(truncateToWidth(nombreCompleto, textW, fontBold, nombreSize), {
-    x: textX,
-    y: bodyTop - 18,
-    size: nombreSize,
-    font: fontBold,
-    color: COLOR_DARK,
+    x: textX, y: bodyTop - 16,
+    size: nombreSize, font: fontBold, color: COLOR_DARK,
+  })
+
+  // Línea decorativa bajo el nombre
+  page.drawLine({
+    start: { x: textX, y: bodyTop - 22 },
+    end: { x: textX + Math.min(textW, 80), y: bodyTop - 22 },
+    thickness: 1.5, color: COLOR_EMERALD,
   })
 
   // Cédula escolar
-  const cedulaLine = data.cedulaEscolar
-    ? `Cédula escolar: ${data.cedulaEscolar}`
-    : 'Cédula escolar: —'
-  page.drawText(truncateToWidth(cedulaLine, textW, fontRegular, 9), {
-    x: textX,
-    y: bodyTop - 34,
-    size: 9,
-    font: fontRegular,
-    color: COLOR_GRAY,
-  })
+  let yPos = bodyTop - 36
+  if (data.cedulaEscolar) {
+    page.drawText('CÉDULA', {
+      x: textX, y: yPos,
+      size: 6, font: fontBold, color: COLOR_EMERALD,
+    })
+    page.drawText(data.cedulaEscolar, {
+      x: textX, y: yPos - 11,
+      size: 9.5, font: fontRegular, color: COLOR_DARK,
+    })
+    yPos -= 26
+  }
 
   // Sección
   if (data.section) {
     const turno = turnoLabel[data.section.turno] || data.section.turno
-    const sectionLine = `Sección: ${data.section.nombre} · ${turno}`
-    page.drawText(truncateToWidth(sectionLine, textW, fontRegular, 9), {
-      x: textX,
-      y: bodyTop - 48,
-      size: 9,
-      font: fontRegular,
-      color: COLOR_GRAY,
+    page.drawText('SECCIÓN', {
+      x: textX, y: yPos,
+      size: 6, font: fontBold, color: COLOR_EMERALD,
     })
-    const gradoLine = `Grado: ${data.section.grado} · Período ${data.section.periodoEscolar}`
-    page.drawText(truncateToWidth(gradoLine, textW, fontRegular, 8.5), {
-      x: textX,
-      y: bodyTop - 60,
-      size: 8.5,
-      font: fontRegular,
-      color: COLOR_GRAY,
+    page.drawText(`${data.section.nombre} · ${turno}`, {
+      x: textX, y: yPos - 11,
+      size: 9.5, font: fontRegular, color: COLOR_DARK,
+    })
+    yPos -= 26
+  }
+
+  // Grado
+  if (data.section) {
+    page.drawText('GRADO', {
+      x: textX, y: yPos,
+      size: 6, font: fontBold, color: COLOR_EMERALD,
+    })
+    page.drawText(`${data.section.grado}°`, {
+      x: textX, y: yPos - 11,
+      size: 9.5, font: fontRegular, color: COLOR_DARK,
     })
   }
 
-  // Género + edad
-  const edad = calcularEdad(data.fechaNacimiento)
-  const extras: string[] = []
-  if (data.genero && generoLabel[data.genero]) extras.push(generoLabel[data.genero]!)
-  if (edad) extras.push(edad)
-  if (extras.length > 0) {
-    page.drawText(extras.join(' · '), {
-      x: textX,
-      y: bodyTop - 72,
-      size: 8.5,
-      font: fontOblique,
-      color: COLOR_GRAY,
-    })
-  }
-
-  // ====== LÍNEA DE PLIEGUE (centro de la página) ======
-  drawDashedLine(page, 8, PAGE_W - 8, HALF_H, COLOR_LINE, 0.5, 3, 2)
-  const foldLabel = '- - - - - - - - pliegue - - - - - - - -'
+  // ====================================================================
+  // LÍNEA DE PLIEGUE
+  // ====================================================================
+  drawDashedLine(page, 10, PAGE_W - 10, HALF_H, COLOR_LINE, 0.5, 3, 2)
+  const foldLabel = '- - - - - cortar / doblar - - - - -'
   const foldW = fontRegular.widthOfTextAtSize(foldLabel, 6)
   page.drawText(foldLabel, {
-    x: (PAGE_W - foldW) / 2,
-    y: HALF_H - 6,
-    size: 6,
-    font: fontRegular,
-    color: COLOR_GRAY,
+    x: (PAGE_W - foldW) / 2, y: HALF_H - 6,
+    size: 6, font: fontRegular, color: COLOR_GRAY,
   })
 
-  // ====== REVERSO (mitad inferior) ======
-  const backTop = HALF_H - 4 // 206
-  const backBottom = 0
+  // ====================================================================
+  // REVERSO (mitad inferior) — QR moderno con marco decorativo
+  // ====================================================================
+  const backTop = HALF_H - 4
 
-  // Fondo claro en la mitad
+  // Fondo blanco
   page.drawRectangle({
-    x: 0,
-    y: backBottom,
-    width: PAGE_W,
-    height: backTop - backBottom,
+    x: 0, y: 0, width: PAGE_W, height: backTop,
     color: COLOR_WHITE,
   })
 
-  // Banda superior del reverso
+  // Banda decorativa superior del reverso
   page.drawRectangle({
-    x: 0,
-    y: backTop - 28,
-    width: PAGE_W,
-    height: 28,
+    x: 0, y: backTop - 24, width: PAGE_W, height: 24,
     color: COLOR_EMERALD_DARK,
   })
-  page.drawText('VERIFICACIÓN', {
-    x: 16,
-    y: backTop - 19,
-    size: 9,
-    font: fontBold,
-    color: COLOR_WHITE,
+  // Acento amarillo
+  page.drawRectangle({
+    x: 0, y: backTop - 28, width: PAGE_W, height: 4,
+    color: rgb(0.95, 0.76, 0.21),
   })
 
-  // Generar QR (PNG)
+  page.drawText('VERIFICACIÓN DIGITAL', {
+    x: MARGIN, y: backTop - 16,
+    size: 9, font: fontBold, color: COLOR_WHITE,
+  })
+
+  // Generar QR con colores modernos
   const qrPng = await QRCode.toBuffer(data.qrCode, {
     type: 'png',
-    width: 300,
+    width: 400,
     margin: 1,
     color: { dark: '#065740', light: '#ffffff' },
-    errorCorrectionLevel: 'M',
+    errorCorrectionLevel: 'H',
   })
   const qrImage = await pdfDoc.embedPng(qrPng)
-  const qrSize = 92 // pt
-  const qrX = (PAGE_W - qrSize) / 2
-  const qrY = backTop - 28 - qrSize - 8
 
-  // Marco blanco detrás del QR
+  // QR más grande con marco decorativo moderno
+  const qrSize = 110
+  const qrX = (PAGE_W - qrSize) / 2
+  const qrY = backTop - 24 - qrSize - 12
+
+  // Marco exterior decorativo (doble borde)
   page.drawRectangle({
-    x: qrX - 4,
-    y: qrY - 4,
-    width: qrSize + 8,
-    height: qrSize + 8,
-    color: COLOR_WHITE,
+    x: qrX - 10, y: qrY - 10,
+    width: qrSize + 20, height: qrSize + 20,
+    color: COLOR_LIGHT_EMERALD,
     borderColor: COLOR_EMERALD,
-    borderWidth: 1,
+    borderWidth: 1.5,
+  })
+  // Marco interior blanco
+  page.drawRectangle({
+    x: qrX - 4, y: qrY - 4,
+    width: qrSize + 8, height: qrSize + 8,
+    color: COLOR_WHITE,
   })
   page.drawImage(qrImage, { x: qrX, y: qrY, width: qrSize, height: qrSize })
 
-  // Texto "Escanea este código"
-  const scanText = 'Escanea este código para verificar'
-  const scanW = fontRegular.widthOfTextAtSize(scanText, 8.5)
+  // Esquinas decorativas en el marco del QR (estilo moderno)
+  const cornerSize = 8
+  const corners = [
+    { x: qrX - 10, y: qrY + qrSize + 10 - cornerSize }, // sup-izq
+    { x: qrX + qrSize + 10 - cornerSize, y: qrY + qrSize + 10 - cornerSize }, // sup-der
+    { x: qrX - 10, y: qrY - 10 }, // inf-izq
+    { x: qrX + qrSize + 10 - cornerSize, y: qrY - 10 }, // inf-der
+  ]
+  corners.forEach((c, i) => {
+    page.drawRectangle({
+      x: c.x, y: c.y, width: cornerSize, height: cornerSize,
+      color: COLOR_EMERALD,
+    })
+  })
+
+  // Texto "Escanea para verificar"
+  const scanText = 'Escanea para verificar'
+  const scanW = fontBold.widthOfTextAtSize(scanText, 9)
   page.drawText(scanText, {
-    x: (PAGE_W - scanW) / 2,
-    y: qrY - 14,
-    size: 8.5,
-    font: fontRegular,
-    color: COLOR_GRAY,
+    x: (PAGE_W - scanW) / 2, y: qrY - 16,
+    size: 9, font: fontBold, color: COLOR_EMERALD_DARK,
   })
 
-  // Código único
-  const codigoLabel = 'Código del estudiante'
-  const codigoLabelW = fontRegular.widthOfTextAtSize(codigoLabel, 7)
-  page.drawText(codigoLabel, {
-    x: (PAGE_W - codigoLabelW) / 2,
-    y: qrY - 28,
-    size: 7,
-    font: fontRegular,
-    color: COLOR_GRAY,
+  // Código único del estudiante en una "caja" destacada
+  const codigoBoxY = qrY - 38
+  const codigoBoxH = 18
+  page.drawRectangle({
+    x: MARGIN + 20, y: codigoBoxY,
+    width: PAGE_W - 2 * (MARGIN + 20), height: codigoBoxH,
+    color: COLOR_LIGHT_EMERALD,
+    borderColor: COLOR_EMERALD,
+    borderWidth: 0.5,
   })
+  const codigoLabel = 'CÓDIGO:'
   const codigoValue = data.codigoUnico
-  const codigoValueW = fontBold.widthOfTextAtSize(codigoValue, 9)
+  const labelW = fontBold.widthOfTextAtSize(codigoLabel, 7)
+  page.drawText(codigoLabel, {
+    x: MARGIN + 28, y: codigoBoxY + 6,
+    size: 7, font: fontBold, color: COLOR_EMERALD_DARK,
+  })
   page.drawText(codigoValue, {
-    x: (PAGE_W - codigoValueW) / 2,
-    y: qrY - 40,
-    size: 9,
-    font: fontBold,
-    color: COLOR_EMERALD_DARK,
+    x: MARGIN + 28 + labelW + 6, y: codigoBoxY + 6,
+    size: 8, font: fontRegular, color: COLOR_DARK,
   })
 
-  // Validez
-  const validText = `Válido para el período escolar ${periodo}`
-  const validW = fontRegular.widthOfTextAtSize(validText, 7.5)
+  // Validez del carnet
+  const validText = `Válido · Período ${periodo}`
+  const validW = fontOblique.widthOfTextAtSize(validText, 7)
   page.drawText(validText, {
-    x: (PAGE_W - validW) / 2,
-    y: qrY - 54,
-    size: 7.5,
-    font: fontOblique,
-    color: COLOR_GRAY,
+    x: (PAGE_W - validW) / 2, y: codigoBoxY - 14,
+    size: 7, font: fontOblique, color: COLOR_GRAY,
   })
 
   // Footer con dirección del plantel
   const direccion = data.plantel?.direccion?.trim()
   if (direccion) {
-    const dirLabel = 'Plantel:'
-    const dirLabelW = fontRegular.widthOfTextAtSize(dirLabel, 7)
-    page.drawText(dirLabel, {
-      x: 16,
-      y: 14,
-      size: 7,
-      font: fontBold,
-      color: COLOR_GRAY,
-    })
-    page.drawText(truncateToWidth(direccion, PAGE_W - 16 - dirLabelW - 8 - 16, fontRegular, 7), {
-      x: 16 + dirLabelW + 4,
-      y: 14,
-      size: 7,
-      font: fontRegular,
-      color: COLOR_GRAY,
+    const dirText = truncateToWidth(direccion, PAGE_W - 2 * MARGIN, fontRegular, 7)
+    const dirW = fontRegular.widthOfTextAtSize(dirText, 7)
+    page.drawText(dirText, {
+      x: (PAGE_W - dirW) / 2, y: 14,
+      size: 7, font: fontRegular, color: COLOR_GRAY,
     })
   }
 
-  // Esquina inferior derecha: identificación del sistema
+  // Esquina inferior: identificación del sistema
   const footerText = 'Lista · Sistema de Asistencia'
-  const footerW = fontOblique.widthOfTextAtSize(footerText, 6.5)
+  const footerW = fontOblique.widthOfTextAtSize(footerText, 6)
   page.drawText(footerText, {
-    x: PAGE_W - footerW - 12,
-    y: 8,
-    size: 6.5,
-    font: fontOblique,
-    color: COLOR_GRAY,
+    x: (PAGE_W - footerW) / 2, y: 6,
+    size: 6, font: fontOblique, color: COLOR_GRAY,
   })
 
   return await pdfDoc.save()
