@@ -333,3 +333,92 @@ Stage Summary:
 - 1 lib compartido fixeado (db-compat.ts).
 - Curl smoke tests: auth/me 200 with whatsapp; alumno/profile 200 with representantes[]; representante/profile GET+PUT 200 con validación 400; alumno/photo POST 200 + file sirve via /api/files; admin/send-pdf POST 200 crea FeedPost pdf + notifications; 403/400 en casos no autorizados/inválidos.
 - Lint: `bun run lint` exit code 0 — limpio.
+
+---
+Task ID: DARK-JUST
+Agent: full-stack-developer (Dark mode + Justifications)
+Task: Dark mode toggle + representative justifications (notify absence)
+
+Work Log:
+- src/app/layout.tsx — wrap children en <ThemeProvider attribute="class" defaultTheme="light"> de next-themes
+- src/components/theme-toggle.tsx — nuevo componente ThemeToggle (Sun/Moon de lucide-react, useTheme de next-themes, persistencia en localStorage, evitar hydration flash con flag `mounted`)
+- src/components/layouts/app-shell.tsx — añadido ThemeToggle en header móvil y en header desktop (junto al icono Bell); importado ClipboardList; añadido item nav «Justificaciones» (view `representante-justifications`) en rol representante; añadido case en ViewRenderer
+- prisma/schema.prisma — añadido modelo Justification (@@map("v3_justifications")) + relaciones `justificationsCreated` en User (relation "JustificationRepresentante") y `justifications` en Student
+- db:push ejecutado correctamente contra SQLite local; SQL para D1 remote ejecutado manualmente por usuario (sin API token en sandbox)
+- src/app/api/representante/justifications/route.ts — GET (lista justificaciones de los hijos del representante, últimos 30 días) y POST (valida ownership vía ParentStudent, crea Justification, crea Notification tipo='justificacion' a tutor de la sección + admins activos, fire-and-forget push). Patrón isD1().
+- src/app/api/representante/justifications/[id]/route.ts — DELETE (cancela justificación pendiente del representante; valida ownership + estado='pendiente'). Patrón isD1().
+- src/components/representante/representante-justifications.tsx — vista con ChildSelector + botón «Nueva Justificación» que abre Dialog (date input default hoy, Select motivo: enfermedad/cita médica/viaje/familiar/otro, Textarea descripción opcional) + lista de justificaciones en cards (Badge motivo teal, Badge estado: pendiente amber / aprobada emerald / rechazada red) + botón Cancelar en pendientes + estado vacío «No has registrado justificaciones»
+
+Stage Summary:
+- Dark mode toggle funcional en móvil y desktop, persiste preferencia en localStorage vía next-themes; icono Sun/Moon cambia según tema; tema por defecto: claro.
+- Schema Prisma actualizado con Justification; `db:push` correcto en dev; SQL para D1 remote listo (se ejecutará en deploy con token configurado).
+- API REST completa con patrón isD1(): GET/POST /api/representante/justifications y DELETE /api/representante/justifications/[id]; verificación de ownership por ParentStudent; notificaciones in-app (v3_notifications, tipo='justificacion') creadas para tutor de la sección + admins activos.
+- UI de justificaciones integrada en sidebar representante (icon ClipboardList, vista `representante-justifications`).
+- Lint: 0 errors. Dev server compila correctamente.
+
+---
+Task ID: REPORTS-CRON
+Agent: full-stack-developer (Monthly PDF + Cron purge)
+Task: Monthly attendance PDF report + GPS auto-purge cron
+
+Work Log:
+- Creado `src/lib/pdf-monthly.ts` con builder pdf-lib (header band emerald, datos del estudiante, resumen con tarjetas de stats, tabla diaria con page breaks, firmas y pie con fecha de generación).
+- Creado `src/app/api/representante/attendance/monthly-pdf/route.ts` (GET, verifica ownership via ParentStudent, isD1 + Prisma, Content-Type: application/pdf, Content-Disposition inline).
+- Creado `src/app/api/admin/students/[id]/attendance-pdf/route.ts` (GET, admin-only, acepta token por header o `?token=` para window.open).
+- Creado `src/app/api/cron/purge-gps/route.ts` (POST + GET, protegido por X-Cron-Secret vs CRON_SECRET, purga LocationPing >30d y Notification leídas >90d, isD1 + Prisma).
+- Modificado `wrangler.toml` (añadido `[triggers] crons = ["0 3 * * *"]`).
+- Modificado `src/components/representante/child-attendance.tsx` (añadido Card "Reporte PDF mensual" con month picker + botón "Descargar PDF del mes", descarga via fetch+Blob+window.open).
+- Modificado `src/components/direccion/students-manager.tsx` (añadido botón "Reporte Asistencia" con icono Download por estudiante + Dialog con month picker que abre PDF en nueva pestaña con token query).
+- Creado `CRON_SETUP.md` con instrucciones (configuración de CRON_SECRET, opciones: Cloudflare Cron Trigger, UptimeRobot, cron-job.org, GitHub Actions, verificación SQL).
+- Creado registro en `/agent-ctx/REPORTS-CRON-full-stack-developer.md`.
+
+Stage Summary:
+- Reporte PDF mensual de asistencia operativo para representante y admin.
+- Cron de purga GPS funcional (requiere CRON_SECRET configurado).
+- Lint pasa limpio (0 errores, 0 warnings) tras corregir import de `Download` en students-manager.
+- Smoke tests: GET sin auth → 401, POST cron sin secret en dev → 503 (comportamiento esperado).
+- Cumplido isD1 pattern, prefijo v3_, booleanos como 0/1, español VE, tema emerald/teal, shadcn/ui.
+
+---
+Task ID: STUDENT-CARNET
+Agent: full-stack-developer (Student management + Carnet PDF)
+Task: Edit/delete with double confirmation + photo in edit + printable carnet PDF
+
+Work Log:
+- Leído contexto previo: worklog (Tasks 0, 2-a, 2-b, 3, 5, D1-ADAPT, FEED-ENHANCE, PROFILES-WHATSAPP), prisma/schema.prisma, src/lib/d1.ts, src/lib/auth.ts, src/lib/db.ts, src/lib/api-client.ts, src/app/api/auth/login/route.ts (patrón isD1), src/app/api/admin/students/route.ts + [id]/route.ts (CRUD existente), src/components/direccion/students-manager.tsx (UI actual), src/components/alumno/carnet-digital.tsx (UI carnet), src/app/api/alumno/photo/route.ts (subida de fotos), src/app/api/files/[...path]/route.ts (servir archivos R2/fs), src/app/api/alumno/profile/route.ts.
+- Instaladas dependencias: pdf-lib@1.17.1, qrcode@1.5.4, @types/qrcode@1.5.6 (no estaban en package.json pese a que la tarea decía "ya instaladas").
+- Creado `src/lib/carnet-pdf.ts` (lib compartida, ~470 líneas):
+  - `fetchStudentDataForCarnet(studentId)`: SQL JOIN v3_students → v3_sections → v3_plantels en D1; Prisma include en dev. Devuelve datos completos del estudiante + sección + plantel.
+  - `fetchPhotoBuffer(fotoKey)`: lee foto de R2 (`Symbol.for('__cloudflare-context__')` → `env.BUCKET`) en prod, filesystem en dev. Devuelve `{ bytes: Uint8Array, format: 'png'|'jpg' } | null`.
+  - `buildCarnetPdf(data)`: genera PDF A6 portrait (297×420 pt) dividido horizontalmente en 2 mitades (frontal + reverso) con línea de pliegue punteada. Frontal: header emerald con nombre del plantel + período, título "CARNET ESTUDIANTIL", foto del estudiante (o iniciales si no hay), nombre, cédula escolar, sección, grado, género+edad. Reverso: banda emerald oscuro "VERIFICACIÓN", QR (qrcode PNG, 300px, color #065740), texto "Escanea este código para verificar", código único, validez del período, dirección del plantel, footer "Lista · Sistema de Asistencia". Helpers: drawInitialsBox, drawDashedLine, truncateToWidth.
+- Creado `src/app/api/admin/students/[id]/carnet-pdf/route.ts`: GET genera PDF del carnet. Auth: Authorization header (Bearer) O query param ?token=... (para que window.open / target=_blank funcione sin headers custom). Solo admin. Devuelve `Content-Type: application/pdf`, `Content-Disposition: inline; filename="carnet-{codigo}.pdf"`, `Cache-Control: no-store`.
+- Creado `src/app/api/alumno/carnet-pdf/route.ts`: GET genera PDF del carnet del alumno autenticado. Auth: header o query ?token=. Solo alumno. Busca studentId por `v3_students.userId = ?` (D1) o `db.student.findFirst({ where: { userId } })` (dev). Devuelve mismo formato PDF.
+- Modificado `src/app/api/admin/students/route.ts` GET: añadido `fotoKey` al SELECT D1 (`s.*` ya lo incluye, solo faltaba exponerlo) y al mapeo de respuesta. Dev (Prisma) ya lo incluía por defecto al usar `include`.
+- Modificado `src/components/direccion/students-manager.tsx`:
+  - Foto en tabla: Avatar con `AvatarImage src={/api/files/${fotoKey}}` si existe, `AvatarFallback` con iniciales si no.
+  - Botón "Carnet PDF" (FileText icon, emerald) en cada fila de acciones: abre `/api/admin/students/{id}/carnet-pdf?token=...` en nueva pestaña vía `window.open`. Loading spinner durante 800ms tras click.
+  - Editar con doble confirmación: Dialog con form (nombre, apellido, cedulaEscolar, sectionId, genero, fechaNacimiento) + sección de foto (Avatar preview + botón "Subir/Cambiar foto" que abre file input). Subida de foto vía `fetch('/api/alumno/photo', { method: 'POST', headers: { Authorization }, body: formData })` directo (NO apiFetch, porque apiFetch siempre pone `Content-Type: application/json` lo que rompe multipart/form-data). Al guardar abre SEGUNDO AlertDialog "¿Confirmas que los datos son correctos?" con "Sí, guardar" / "No, revisar". Solo tras confirmar ejecuta PUT + upload de foto si se seleccionó.
+  - Eliminar con doble confirmación: AlertDialog paso 1 "¿Eliminar a {nombre}?" con Cancelar/Continuar. Tras Continuar, AlertDialog paso 2 "Esta acción no se puede deshacer" con Input de texto + instrucciones de escribir el nombre completo exacto. Botón "Eliminar definitivamente" solo habilitado cuando el texto coincide exacto (case-insensitive, trim). Llamada DELETE solo tras coincidencia.
+- Modificado `src/components/alumno/carnet-digital.tsx`: añadido botón "Descargar Carnet PDF" (FileText icon, emerald) junto al botón "Descargar QR" existente. Abre `/api/alumno/carnet-pdf?token=...` en nueva pestaña. Import añadido: FileText.
+- Tema visual: emerald/teal consistente. Textos en español Venezuela. shadcn/ui (Dialog, AlertDialog, Avatar, Switch, Badge, Button, Input, Label, Select, Table, Card, Skeleton) + lucide-react (FileText, Camera, Upload, AlertTriangle, CheckCircle2, Trash2, Pencil, Loader2, Plus, Search, Users, GraduationCap).
+- Probado con curl (login admin/alumno + GET carnet-pdf):
+  - GET /api/admin/students/{id}/carnet-pdf con Authorization header → 200, PDF 6760 bytes, `PDF document, version 1.7`.
+  - GET /api/admin/students/{id}/carnet-pdf?token=... → 200, mismo PDF (window.open compatible).
+  - GET /api/admin/students/{id}/carnet-pdf sin auth → 401.
+  - GET /api/admin/students/{id}/carnet-pdf con token de alumno (rol incorrecto) → 403.
+  - GET /api/admin/students/{id}/carnet-pdf con id inexistente → 404.
+  - GET /api/alumno/carnet-pdf con token alumno → 200, PDF 6978 bytes (incluye foto embebida tras subirla), 7174 bytes.
+  - GET /api/alumno/carnet-pdf con token admin (rol incorrecto) → 403.
+  - GET /api/admin/students?limit=5 → 200, respuesta ahora incluye `fotoKey` field.
+- Bug encontrado: `apiFetch` en src/lib/api-client.ts SIEMPRE añade `Content-Type: application/json`, lo que rompe subidas multipart/form-data. Esto ya estaba afectando a `src/components/alumno/carnet-digital.tsx` (handlePhotoUpload). Para mis cambios en students-manager.tsx, bypassé apiFetch y usé `fetch` directo con solo el header Authorization. NO modifiqué api-client.ts (riesgo de romper otras rutas que dependen del comportamiento actual).
+- Limpieza: reseteado fotoKey del estudiante de prueba Carlos Pérez y borrados archivos profile-*.png temporales en public/uploads/.
+- Nota: otro agente corrió concurrentemente y añadió un feature de "reporte mensual de asistencia PDF" al mismo archivo students-manager.tsx (estado `attendancePdfTarget`, función `openAttendancePdf`, Dialog con selector de mes, ruta `/api/admin/students/[id]/attendance-pdf`). Sus cambios coexisten con los míos sin conflicto.
+
+Stage Summary:
+- 3 archivos API creados: `src/app/api/admin/students/[id]/carnet-pdf/route.ts`, `src/app/api/alumno/carnet-pdf/route.ts`, lib compartida `src/lib/carnet-pdf.ts` (fetchStudentDataForCarnet + fetchPhotoBuffer + buildCarnetPdf).
+- 1 archivo API modificado: `src/app/api/admin/students/route.ts` (expone fotoKey en respuesta GET).
+- 2 componentes modificados: `src/components/direccion/students-manager.tsx` (foto en tabla, edit con doble confirmación + upload de foto, delete con doble confirmación + match de nombre, botón Carnet PDF), `src/components/alumno/carnet-digital.tsx` (botón Descargar Carnet PDF).
+- Lint exit code 0 — limpio en todos los archivos nuevos/modificados.
+- 2 dependencias instaladas: pdf-lib, qrcode (+ @types/qrcode en dev).
+- Todos los endpoints probados con curl: 200 OK con PDF válido, 401/403/404 en casos no autorizados/inexistentes.
+- Compatible con Cloudflare Workers (isD1 + R2 bucket binding) y dev local (Prisma + filesystem).

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { api } from '@/lib/api-client'
+import { useAuthStore } from '@/stores/auth-store'
 import { useRepresentanteStore } from '@/stores/representante-store'
 import { ChildSelector } from './child-selector'
 import {
@@ -12,6 +13,9 @@ import {
 } from './utils'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
@@ -24,6 +28,9 @@ import {
   Clock,
   TrendingUp,
   Users,
+  Download,
+  Loader2,
+  FileText,
 } from 'lucide-react'
 
 interface AttendanceRecord {
@@ -66,6 +73,14 @@ export function ChildAttendance() {
   const [records, setRecords] = useState<AttendanceRecord[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Default to current month in YYYY-MM format
+  const todayForMonth = new Date()
+  const defaultMonth = `${todayForMonth.getFullYear()}-${String(
+    todayForMonth.getMonth() + 1
+  ).padStart(2, '0')}`
+  const [selectedMonth, setSelectedMonth] = useState(defaultMonth)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
+
   useEffect(() => {
     fetchChildren()
   }, [fetchChildren])
@@ -96,6 +111,38 @@ export function ChildAttendance() {
       active = false
     }
   }, [selectedChild?.id, loadAttendance])
+
+  const handleDownloadPdf = useCallback(async () => {
+    if (!selectedChild) return
+    setDownloadingPdf(true)
+    try {
+      const token = useAuthStore.getState().token
+      const res = await fetch(
+        `/api/representante/attendance/monthly-pdf?estudianteId=${selectedChild.id}&month=${selectedMonth}`,
+        {
+          method: 'GET',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        }
+      )
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(
+          (errData as { error?: string }).error || `Error ${res.status}`
+        )
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      // Open in a new tab so user can preview / print / save
+      window.open(url, '_blank')
+      // Revoke after the new tab has had time to load
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      toast.success('Reporte PDF generado')
+    } catch (e: unknown) {
+      toast.error('Error al generar PDF: ' + (e as Error).message)
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }, [selectedChild, selectedMonth])
 
   const attendanceMap = useMemo(() => buildAttendanceMap(records), [records])
 
@@ -177,6 +224,46 @@ export function ChildAttendance() {
               accent="amber"
             />
           </div>
+
+          {/* PDF download — monthly report */}
+          <Card className="border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/10">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileText className="w-4 h-4 text-emerald-600" />
+                Reporte PDF mensual
+              </CardTitle>
+              <CardDescription>
+                Descarga el reporte formal de asistencia del mes seleccionado,
+                con estadísticas, detalle diario y líneas de firma.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col sm:flex-row items-end gap-3">
+              <div className="flex-1 w-full space-y-2">
+                <Label htmlFor="month-picker" className="text-xs">
+                  Mes del reporte
+                </Label>
+                <Input
+                  id="month-picker"
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+              <Button
+                onClick={handleDownloadPdf}
+                disabled={downloadingPdf}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto"
+              >
+                {downloadingPdf ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4 mr-2" />
+                )}
+                Descargar PDF del mes
+              </Button>
+            </CardContent>
+          </Card>
 
           {/* Resumen por porcentaje */}
           <Card>

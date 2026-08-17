@@ -56,3 +56,4 @@ server.log
 .open-next/
 .next/
 .vercel/
+prisma/dev.db

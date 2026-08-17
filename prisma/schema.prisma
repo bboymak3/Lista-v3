@@ -30,15 +30,16 @@ model User {
   updatedAt  DateTime @updatedAt
 
   // Relations
-  studentProfile        Student?             @relation("StudentUser")
-  tutorSections         Section[]            @relation("SectionTutor")
-  sectionAssignments    SectionAssignment[]
-  professorCheckins     ProfessorCheckin[]
-  feedPosts             FeedPost[]
-  parentLinks           ParentStudent[]
-  notificationsReceived Notification[]
-  pushSubscriptions     PushSubscription[]
-  attendanceMarked      Attendance[]         @relation("AttendanceMarker")
+  studentProfile         Student?             @relation("StudentUser")
+  tutorSections          Section[]            @relation("SectionTutor")
+  sectionAssignments     SectionAssignment[]
+  professorCheckins      ProfessorCheckin[]
+  feedPosts              FeedPost[]
+  parentLinks            ParentStudent[]
+  notificationsReceived  Notification[]
+  pushSubscriptions      PushSubscription[]
+  attendanceMarked       Attendance[]         @relation("AttendanceMarker")
+  justificationsCreated  Justification[]      @relation("JustificationRepresentante")
 
   @@index([rol, activo])
   @@map("v3_users")
@@ -133,6 +134,7 @@ model Student {
   parents            ParentStudent[]
   attendance         Attendance[]
   locationPings      LocationPing[]
+  justifications     Justification[]
 
   @@index([sectionId, activo])
   @@index([nombre, apellido])
@@ -282,4 +284,24 @@ model LocationPing {
 
   @@index([estudianteId, timestamp])
   @@map("v3_location_pings")
+}
+
+// ============================================
+// JUSTIFICACIONES (representante notifica ausencia)
+// ============================================
+
+model Justification {
+  id              String   @id @default(cuid())
+  estudianteId    String
+  estudiante      Student  @relation(fields: [estudianteId], references: [id], onDelete: Cascade)
+  representanteId String
+  representante   User     @relation("JustificationRepresentante", fields: [representanteId], references: [id])
+  fecha           String   // YYYY-MM-DD (la fecha de la ausencia)
+  motivo          String   // enfermedad | cita_medica | viaje | familiar | otro
+  descripcion     String?
+  estado          String   @default("pendiente") // pendiente | aprobada | rechazada
+  createdAt       DateTime @default(now())
+
+  @@index([estudianteId, fecha])
+  @@map("v3_justifications")
 }

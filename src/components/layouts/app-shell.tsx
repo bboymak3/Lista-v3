@@ -39,9 +39,11 @@ import {
   Settings,
   UserCircle,
   FileText,
+  ClipboardList,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { ThemeToggle } from '@/components/theme-toggle'
 
 // Profesor views (lazy loaded inline)
 import { ProfesorDashboard } from '@/components/profesor/profesor-dashboard'
@@ -65,6 +67,7 @@ import { ChildAttendance } from '@/components/representante/child-attendance'
 import { RepresentanteFeed } from '@/components/representante/representante-feed'
 import { RepresentanteNotifications } from '@/components/representante/representante-notifications'
 import { RepresentanteProfile } from '@/components/representante/representante-profile'
+import { RepresentanteJustifications } from '@/components/representante/representante-justifications'
 
 // Alumno views
 import { AlumnoDashboard } from '@/components/alumno/alumno-dashboard'
@@ -100,6 +103,7 @@ const navByRole: Record<Role, NavItem[]> = {
     { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, view: 'representante-dashboard' },
     { id: 'location', label: 'Ubicación', icon: MapPin, view: 'representante-location' },
     { id: 'attendance', label: 'Asistencia', icon: ClipboardCheck, view: 'representante-attendance' },
+    { id: 'justifications', label: 'Justificaciones', icon: ClipboardList, view: 'representante-justifications' },
     { id: 'feed', label: 'Noticias', icon: Newspaper, view: 'representante-feed' },
     { id: 'notifications', label: 'Avisos', icon: Bell, view: 'representante-notifications' },
     { id: 'profile', label: 'Mi Perfil', icon: Settings, view: 'representante-profile' },
@@ -324,18 +328,20 @@ export function AppShell() {
               </Button>
             </SheetTrigger>
           </Sheet>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1">
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
               <GraduationCap className="w-4 h-4 text-white" />
             </div>
             <span className="font-semibold">Lista</span>
           </div>
+          <ThemeToggle className="shrink-0" />
         </header>
 
         {/* Page Header */}
         <header className="hidden md:flex items-center justify-between px-6 h-14 border-b bg-card">
           <h2 className="font-semibold text-lg">{activeItem?.label}</h2>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Button variant="ghost" size="icon" className="relative">
               <Bell className="w-5 h-5" />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
@@ -433,6 +439,8 @@ function ViewRenderer({ view }: { view: string }) {
         return <RepresentanteFeed />
       case 'representante-notifications':
         return <RepresentanteNotifications />
+      case 'representante-justifications':
+        return <RepresentanteJustifications />
       case 'representante-profile':
         return <RepresentanteProfile />
       default:

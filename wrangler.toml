@@ -27,3 +27,8 @@ enabled = true
 # Vars
 [vars]
 NEXT_PUBLIC_APP_URL = "https://lista.workers.dev"
+
+# Cron Triggers - run daily at 3 AM to purge old GPS data
+[triggers]
+crons = ["0 3 * * *"]
+

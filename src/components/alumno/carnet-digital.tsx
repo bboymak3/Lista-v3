@@ -25,6 +25,7 @@ import {
   Camera,
   Upload,
   Users,
+  FileText,
 } from 'lucide-react'
 
 interface PlantelInfo {
@@ -155,6 +156,13 @@ export function CarnetDigital() {
     toast.success('Código QR descargado')
   }
 
+  const handleDownloadCarnetPdf = () => {
+    const token = useAuthStore.getState().token
+    const url = `/api/alumno/carnet-pdf${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    window.open(url, '_blank', 'noopener,noreferrer')
+    toast.success('Generando carnet PDF…')
+  }
+
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !profile) return
@@ -245,10 +253,16 @@ export function CarnetDigital() {
             Tu identificación escolar digital · muéstralo en el plantel
           </p>
         </div>
-        <Button onClick={handleDownload} variant="outline" size="sm">
-          <Download className="w-4 h-4 mr-1" />
-          Descargar QR
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={handleDownloadCarnetPdf} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            <FileText className="w-4 h-4 mr-1" />
+            Descargar Carnet PDF
+          </Button>
+          <Button onClick={handleDownload} variant="outline" size="sm">
+            <Download className="w-4 h-4 mr-1" />
+            Descargar QR
+          </Button>
+        </div>
       </div>
 
       {/* === TARJETA DE CARNET === */}

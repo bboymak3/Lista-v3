@@ -60,6 +60,7 @@ export async function GET(request: NextRequest) {
       genero: string | null
       sectionId: string
       qrCode: string
+      fotoKey: string | null
       activo: number
       createdAt: string
       updatedAt: string
@@ -131,6 +132,7 @@ export async function GET(request: NextRequest) {
       genero: r.genero,
       sectionId: r.sectionId,
       qrCode: r.qrCode,
+      fotoKey: r.fotoKey,
       activo: r.activo === 1,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
