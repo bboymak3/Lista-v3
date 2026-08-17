@@ -1,0 +1,451 @@
+     1→# Worklog — Sistema de Asistencia Escolar (Lista v3)
+     2→
+     3→Proyecto: Reescritura completa del sistema de asistencia escolar.
+     4→Stack: Next.js 16 + Prisma + SQLite (local) / D1 (prod) + shadcn/ui + R2.
+     5→4 apps en una sola codebase: Dirección, Profesor, Representante, Alumno.
+     6→
+     7→---
+     8→Task ID: 0
+     9→Agent: main
+    10→Task: Fase 0 — Configurar entorno, worklog, dependencias y schema base
+    11→
+    12→Work Log:
+    13→- Analizado repositorio original (Cloudflare Pages Functions + D1 + R2)
+    14→- Decidida arquitectura: Next.js 16 + Prisma + SQLite (dev) / D1 (prod) + R2 (fotos)
+    15→- GPS tiempo real vía long polling (Durable Objects requiere plan pago)
+    16→- Push notifications Android (VAPID Web Push)
+    17→- Instaladas dependencias: bcryptjs, jsonwebtoken
+    18→- Schema Prisma con 12 modelos: User, Plantel, Section, SectionAssignment, Student, ParentStudent, AttendanceSession, Attendance, ProfessorCheckin, FeedPost, Notification, PushSubscription, LocationPing
+    19→
+    20→Stage Summary:
+    21→- Worklog creado en /home/z/my-project/worklog.md
+    22→- Prisma schema definido con soporte multi-plantel, multi-hijo, geocerca, feed social, tracking GPS
+    23→- Próximo: db:push, auth system, layout base por roles
+    24→
+    25→---
+    26→Task ID: 2-a
+    27→Agent: general-purpose (Dirección app)
+    28→Task: Build admin app — students, sections, plantel geocerca, users management
+    29→
+    30→Work Log:
+    31→- Leído contexto previo: schema Prisma (12 modelos), auth (JWT + bcryptjs), Zustand stores (auth + view), AppShell con navegación por rol.
+    32→- Detectado trabajo previo de otro agente: profesor views ya integradas en app-shell.tsx y view-store.ts creado.
+    33→- Creados 9 endpoints admin bajo `src/app/api/admin/`:
+    34→  - `students/route.ts` (GET con paginación+search+sectionId filter, POST con generación UUID de qrCode)
+    35→  - `students/[id]/route.ts` (PUT con validación de unicidad, DELETE soft)
+    36→  - `sections/route.ts` (GET con _count students, POST con sincronización de SectionAssignment)
+    37→  - `sections/[id]/route.ts` (PUT reasigna tutor y sincroniza assignments, DELETE soft)
+    38→  - `plantels/route.ts` (GET con sectionCount, POST)
+    39→  - `plantels/[id]/route.ts` (PUT — geocerca lat/lng/radioM)
+    40→  - `users/route.ts` (GET con filtro rol+search, POST con hashPassword via db-auth)
+    41→  - `users/[id]/route.ts` (PUT con re-hash opcional de password, DELETE soft — bloquea auto-desactivación)
+    42→  - `stats/route.ts` (GET para dashboard: totals, attendance de hoy, attendance by section últimos 7 días, actividad reciente)
+    43→- Todos los endpoints validan `getUserFromRequest(request)` + `rol === 'admin'` → 403 si no.
+    44→- Creados 5 componentes admin bajo `src/components/direccion/`:
+    45→  - `admin-dashboard.tsx`: 4 stat cards (estudiantes/secciones/profesores/asistencia hoy) + BarChart recharts (presente/ausente/tardanza por sección, 7 días) + lista de actividad reciente con ScrollArea.
+    46→  - `students-manager.tsx`: tabla con avatar+iniciales, search con debounce 250ms, filtro por sección, Switch de activo, Dialog create/edit (nombre, apellido, cedulaEscolar, sectionId select, genero, fechaNacimiento), AlertDialog para eliminar.
+    47→  - `sections-manager.tsx`: grid de Cards (nombre, plantel, turno, grado, tutor, studentCount) con botones editar/eliminar, Dialog con select de profesores para tutor, aviso si no hay planteles.
+    48→  - `plantel-config.tsx`: sidebar de planteles + form (nombre, dirección, lat, lng, radioM, periodo) + visualización circular escalada del radio de geocerca con centrado en Crosshair.
+    49→  - `users-manager.tsx`: Tabs (Todos/Admin/Profesores/Representantes/Alumnos), tabla con rol Badge coloreado, Switch activo, Dialog create/edit con cedulaPrefix (V-/E-), rol select, password opcional en edición.
+    50→- `UsersManager` acepta prop opcional `defaultRole="profesor"` para reutilizar desde la vista `admin-professors`.
+    51→- Editado `src/components/layouts/app-shell.tsx`:
+    52→  - Añadidos imports de los 5 componentes admin.
+    53→  - Añadido bloque `if (user.rol === 'admin') { switch(view) { ... } }` al inicio del ViewRenderer (preserva el bloque profesor existente y el fallback para representante/alumno).
+    54→- Tema visual esmeralda/teal consistente, textos en español Venezuela, sonner para toasts.
+    55→- Probado con curl: login admin → 200, todos los GET devuelven datos correctos, POST crea usuario/estudiante correctamente con qrCode UUID generado, AUTH check: profesor → 403 en /api/admin/users, sin token → 403.
+    56→- `bun run lint`: 1 error pre-existente en `src/app/page.tsx:15` (setState dentro de useEffect) — NO introducido por este agente, archivo en lista de "DO NOT modify". Mis archivos pasan limpios. TypeScript: mis archivos sin errores.
+    57→
+    58→Stage Summary:
+    59→- 9 archivos de API creados en `src/app/api/admin/` (students, sections, plantels, users con [id], +stats).
+    60→- 5 componentes creados en `src/components/direccion/` (admin-dashboard, students-manager, sections-manager, plantel-config, users-manager).
+    61→- ViewRenderer actualizado con switch admin que cubre 6 vistas (dashboard, students, sections, professors reusing UsersManager, plantel, users).
+    62→- Endpoints validados con curl: GET/POST/PUT/DELETE funcionando, autorización admin correcta (403 para no-admin).
+    63→- Lint: pasa para todo el código introducido. Error pre-existente en page.tsx no es responsabilidad de este agente.
+    64→- Pendiente para próximos agentes: vistas de representante y alumno (placeholders actuales en ViewRenderer).
+    65→
+    66→---
+    67→Task ID: 2-b
+    68→Agent: full-stack-developer (Profesor app)
+    69→Task: Build profesor app — attendance, checkin GPS, feed posting, notifications
+    70→
+    71→Work Log:
+    72→- Leído worklog y schema Prisma para entender estructura (User, Section, SectionAssignment, Student, AttendanceSession, Attendance, ProfessorCheckin, FeedPost, Notification, ParentStudent)
+    73→- Creadas 5 API routes bajo `src/app/api/profesor/`:
+    74→  - `sections/route.ts` — GET lista secciones donde el profesor es tutor o está asignado (vía SectionAssignment). Incluye `studentCount`.
+    75→  - `students/route.ts` — GET estudiantes de una sección ordenados por apellido, nombre.
+    76→  - `attendance/route.ts` — GET sesión de hoy; POST crea AttendanceSession si no existe + upsert Attendance por estudiante + crea Notification a representantes para ausente/tardanza; PUT cierra sesión y auto-marca ausentes.
+    77→  - `checkin/route.ts` — GET estado de hoy + historial 7 días; POST registra entrada (idempotente: si ya existe, devuelve el existente) / salida (requiere entrada previa).
+    78→  - `feed/route.ts` — GET publicaciones propias; POST crea FeedPost + crea Notification a todos los representantes principales de la sección.
+    79→- Creada `src/app/api/notifications/route.ts` — GET lista notificaciones del usuario (cualquier rol) ordenadas desc, límite 50; PUT marca como leída (por id o todas).
+    80→- Creado store de navegación `src/stores/view-store.ts` (zustand) para que componentes hijos puedan cambiar de vista sin prop drilling.
+    81→- Creados 5 componentes profesor en `src/components/profesor/`:
+    82→  - `profesor-dashboard.tsx` — tarjeta de bienvenida con gradiente emerald, acciones rápidas (Pasar Asistencia, Registrar Entrada, Publicar Aviso), estado de check-in de hoy, lista de secciones asignadas con badge de rol.
+    83→  - `attendance-taker.tsx` — selector de sección, grid de stats (total/presentes/ausentes/tardanzas), lista de estudiantes con botones de estado (Presente verde / Ausente rojo / Tardanza ámbar / Justificado azul), botones "Guardar Asistencia" y "Cerrar Sesión", banner cuando sesión cerrada.
+    84→  - `profesor-checkin.tsx` — card de estado (entrada/salida), dos botones grandes (Registrar Entrada emerald / Registrar Salida naranja) que usan `navigator.geolocation.getCurrentPosition`, card con ubicación capturada + precisión, historial 7 días.
+    85→  - `feed-poster.tsx` — selector de sección + tipo (Texto/Foto/Aviso), textarea con contador, preview de imagen con FileReader, lista de publicaciones recientes con avatar del profesor y badge de tipo.
+    86→  - `profesor-notifications.tsx` — lista con iconos por tipo (ausencia/tardanza/feed/checkin/general), botón "Marcar todo como leído", indicador de no leídas.
+    87→- Editado `src/components/layouts/app-shell.tsx`:
+    88→  - Importados los 5 componentes profesor.
+    89→  - Reemplazado `useState` local por `useViewStore` para permitir navegación programática.
+    90→  - Añadido `useEffect` para inicializar la vista según el rol del usuario (admin-dashboard, profesor-dashboard, etc.).
+    91→  - Añadido switch case en `ViewRenderer` para rol='profesor' (5 vistas + default al dashboard).
+    92→  - Refactorizado `SidebarContent` fuera del cuerpo de `AppShell` como componente con props explícitas — esto resuelve errores de lint `react-hooks/static-components` preexistentes.
+    93→- Verificado con curl todos los endpoints:
+    94→  - Profesor recibe sus secciones y estudiantes correctamente.
+    95→  - POST attendance crea sesión + upsert registros + notifica al representante cuando se marca ausente.
+    96→  - POST checkin es idempotente y valida entrada antes de salida.
+    97→  - POST feed crea notificación para cada representante principal de la sección.
+    98→  - PUT notifications marca como leída correctamente.
+    99→  - 403 cuando un admin intenta acceder a /api/profesor/*.
+   100→
+   101→Stage Summary:
+   102→- 5 endpoints API profesor + 1 endpoint notifications creados y probados con curl.
+   103→- 5 componentes profesor construidos con UI responsive, dark mode y tema emerald/teal.
+   104→- ViewRenderer conectado para rol profesor; admin/representante/alumno mantienen su fallback intacto.
+   105→- Lint: solo queda 1 error preexistente en `src/app/page.tsx` (que por regla no podemos modificar); todos los archivos que creé/modifiqué pasan lint limpio.
+   106→- Contexto de tarea guardado en `/agent-ctx/2-b-full-stack-developer-profesor.md`.
+   107→
+   108→---
+   109→Task ID: 5
+   110→Agent: full-stack-developer (Alumno app)
+   111→Task: Build alumno app — carnet QR digital, check-in GPS con geocerca, feed, historial
+   112→
+   113→Work Log:
+   114→- Leído worklog previo (Task 0, 2-a, 2-b) y schema Prisma para entender el contexto: 4 apps (admin, profesor, representante, alumno) con un solo AppShell y ViewRenderer por rol. Auth, Zustand stores, sidebar, profesor views y admin views ya estaban integrados.
+   115→- Verificado el seed: alumno V-00000002 / alumno123 → Carlos Pérez, student EST-2024-001, sección "1° A" (section-default), plantel Liceo Demo (lat 10.4806, lng -66.9036, radio 200m).
+   116→- Instalada dependencia `qrcode.react@4.2.0` para generar QR SVG scannable en el carnet digital.
+   117→- Creados 5 endpoints API bajo `src/app/api/alumno/`:
+   118→  - `profile/route.ts` — GET devuelve perfil del Student (codigoUnico, cedulaEscolar, nombre, apellido, fechaNacimiento, genero, qrCode, section con plantel). Lookup por `userId === user.id`.
+   119→  - `location/route.ts` — POST crea LocationPing (lat, lng, precision opcional); GET devuelve el último LocationPing del estudiante.
+   120→  - `checkin/route.ts` — GET devuelve asistencia de hoy + datos del plantel; POST recibe {lat, lng}, calcula distancia Haversine al plantel, valida geocerca (403 con `distancia` y `radioPermitido` si fuera de rango). Idempotente: si ya hay asistencia hoy con origen=gps_auto y estado=presente, la devuelve. Si existe pero fue marcada por el profesor (ausente, etc.), el GPS check-in la **sobrescribe** a presente/gps_auto con las nuevas coords (demostrando presencia física). Si no existe, busca sesión activa de la sección hoy y la enlaza; si no hay sesión, crea la asistencia standalone.
+   121→  - `feed/route.ts` — GET lista FeedPost de la sección del alumno, incluye nombre del profesor, ordenados por createdAt desc, límite 50.
+   122→  - `attendance/route.ts` — GET historial de asistencia del alumno (últimos 30 días) con datos de la sesión asociada.
+   123→- Todos los endpoints validan `getUserFromRequest` + `rol === 'alumno'` → 403 si no.
+   124→- Creados 4 componentes en `src/components/alumno/`:
+   125→  - `alumno-dashboard.tsx` — tarjeta de bienvenida con gradiente emerald, tarjeta de estado de hoy (Presente/Ausente/No registrado), botón grande de Check-in si no ha registrado, grid de acciones rápidas (Carnet, Check-in, Noticias), fila de stats (avisos sin leer, hora de entrada, geocerca del plantel).
+   126→  - `carnet-digital.tsx` — tarjeta de carnet con QR real scannable (QRCodeSVG de qrcode.react, color emerald #047857). Layout: header gradient emerald→teal con nombre del plantel + período, cuerpo con avatar con iniciales, datos en grid (código, cédula, plantel, grado), QR en marco blanco, footer con badge ACTIVO/INACTIVO. Cards adicionales con datos del plantel y personales. Botón "Descargar QR" serializa el SVG a archivo descargable.
+   127→  - `alumno-checkin.tsx` — status card grande (presente verde / sin registro ámbar), botón XL "Registrar Entrada" emerald con icono MapPin, on click pide geolocation (enableHighAccuracy, timeout 15s), captura errores (permiso denegado / GPS off / timeout). POST con fetch directo (no api-client) para poder leer el body del 403 y mostrar visualización tipo mapa con el plantel en el centro y la posición del alumno fuera. Cards de coordenadas capturadas con precisión. Historial de últimos 7 días con badges por estado.
+   128→  - `alumno-feed.tsx` — feed scrolleable de publicaciones de la sección con avatar del profesor, badge de tipo (texto/foto/aviso), timestamp relativo (hace X min/h/d), contenido con whitespace-pre-wrap, fotos clickeables con lightbox. Botón "Actualizar" con spinner. Empty state amigable.
+   129→- Editado `src/components/layouts/app-shell.tsx`:
+   130→  - Añadidos imports de los 4 componentes alumno.
+   131→  - Añadido bloque `if (user.rol === 'alumno') { switch(view) {...} }` ANTES del fallback, cubriendo `alumno-dashboard`, `alumno-carnet`, `alumno-checkin`, `alumno-feed` con default al dashboard. El fallback original se preserva para el rol `representante` (que sigue en construcción por otro agente en paralelo).
+   132→- Probado con curl todos los endpoints:
+   133→  - GET /api/alumno/profile → 200 con datos completos de Carlos Pérez + sección + plantel.
+   134→  - GET /api/alumno/checkin → 200 con asistencia de hoy (estado, origen, plantel con radioM).
+   135→  - POST /api/alumno/checkin con coords lejanas → 403 con `distancia: 112393m`, `radioPermitido: 200m`.
+   136→  - POST /api/alumno/checkin con coords cercanas → 200, sobrescribe asistencia previa del profesor (ausente) a `presente/gps_auto` con nuevas coords y sessionId enlazado. `yaExistente: false`.
+   137→  - POST /api/alumno/checkin segunda vez → 200 con `yaExistente: true` (idempotente).
+   138→  - GET /api/alumno/attendance, GET /api/alumno/feed, POST/GET /api/alumno/location → todos 200.
+   139→  - Profesor → 403 en /api/alumno/*. Sin token → 401.
+   140→- Tema visual emerald/teal consistente con el resto de la app. Textos en español Venezuela. sonner para toasts.
+   141→- Lint: 2 errores PERO ninguno en mis archivos — ambos son pre-existentes/paralelos:
+   142→  - `src/app/page.tsx:15` (regla "DO NOT modify" — error ya reportado por Task 2-a).
+   143→  - `src/components/representante/representante-dashboard.tsx:138` (archivo creado por otro agente en paralelo, no mi responsabilidad).
+   144→  Todos mis archivos (`src/app/api/alumno/*`, `src/components/alumno/*`, edición de `app-shell.tsx`) pasan lint limpio.
+   145→
+   146→Stage Summary:
+   147→- 5 endpoints API alumno creados y probados con curl en `src/app/api/alumno/` (profile, location, checkin, feed, attendance).
+   148→- 4 componentes alumno creados en `src/components/alumno/` (alumno-dashboard, carnet-digital, alumno-checkin, alumno-feed).
+   149→- ViewRenderer actualizado con switch `alumno` que cubre 4 vistas + default al dashboard. Sidebar del alumno ya estaba configurado en `navByRole.alumno` desde Task 0.
+   150→- QR scannable real instalado y funcionando (`qrcode.react@4.2.0`).
+   151→- Geocerca Haversine funcionando: 403 con `distancia` y `radioPermitido` cuando el alumno está fuera del radio del plantel.
+   152→- Sobrescritura de asistencia: si el profesor marcó ausente y el alumno hace check-in GPS válido dentro del plantel, la asistencia se actualiza a `presente/gps_auto`. Idempotente en el segundo check-in.
+   153→- Lint pasa para todo el código introducido. Errores pre-existentes en page.tsx y representante-dashboard.tsx no son responsabilidad de este agente.
+   154→- Contexto de tarea guardado en `/agent-ctx/5-full-stack-developer-alumno.md`.
+   155→- Pendiente para próximos agentes: completar la app de representante (actualmente usa fallback placeholder).
+   156→
+   157→---
+   158→Task ID: 3
+   159→Agent: full-stack-developer (Representante app)
+   160→Task: Build representante app — child selector, GPS location map (long polling), attendance, feed, notifications
+   161→
+   162→Work Log:
+   163→- Leído worklog + schema Prisma + app-shell + auth + profesor endpoints para entender el contexto previo (Task 0, 2-a, 2-b) y los patrones existentes (auth con JWT, apiFetch con token automático, AppShell con ViewRenderer por rol).
+   164→- Creadas 5 API routes bajo `src/app/api/representante/`:
+   165→  - `children/route.ts` — GET lista hijos del representante vía ParentStudent. Incluye section (nombre/grado/turno) + plantel (lat/lng/radioM).
+   166→  - `location/route.ts` — GET último LocationPing con soporte de **long polling**: `?wait=true&lastTimestamp=xxx` sondea DB cada 3s hasta 25s. Si llega un ping más nuevo, responde inmediatamente; si timeout, retorna último conocido con `stale: true`.
+   167→  - `attendance/route.ts` — GET asistencia del estudiante (últimos 30 días) con info de sesión. Verifica propiedad vía ParentStudent.
+   168→  - `feed/route.ts` — GET FeedPosts de todas las secciones de los hijos del representante. Incluye profesor y section. Ordenado por createdAt desc, límite 50.
+   169→  - `notifications/route.ts` — GET notificaciones del representante (no leídas primero, luego por fecha desc).
+   170→- Creado store `src/stores/representante-store.ts` (Zustand) con children list, selectedChildId, fetchChildren, selectChild — cachea hijos en sesión para evitar re-fetch entre vistas.
+   171→- Creados 8 componentes en `src/components/representante/`:
+   172→  - `utils.ts` — haversine, formatDistance, formatRelative, estadoStyle, notifStyle.
+   173→  - `child-selector.tsx` — DropdownMenu si hay múltiples hijos, card simple si solo uno. Avatar con iniciales.
+   174→  - `map-view.tsx` — **mapa SVG custom viewBox 400x300** con plantel como círculo verde (radio proporcional a radioM), estudiante como punto azul pulsante, línea con etiqueta de distancia, cuadrícula N/S/E/O en metros, brújula, leyenda. Auto-escalado basado en max(radioM, distancia).
+   175→  - `child-location-map.tsx` — vista con mapa + long polling iniciado en mount, refresco cada 15s como fallback, "Actualizar" button. 3 cards de detalles: última actualización, distancia al plantel con badge dentro/fuera, precisión GPS.
+   176→  - `child-attendance.tsx` — calendario 30 días con color coding por estado, stats grid (4 cards: % asistencia, presentes, ausentes, tardanzas), barra de progreso segmentada por estado, lista detallada con scroll.
+   177→  - `representante-feed.tsx` — feed tipo red social con avatar profesor, badge de tipo (texto/foto/aviso), placeholder `📷 Foto adjunta` con mediaKey para futura integración R2.
+   178→  - `representante-notifications.tsx` — lista con iconos por tipo (ausencia/tardanza/feed/salida_plantel/checkin/general), click para marcar como leída (PUT /api/notifications?id=xxx), botón "Marcar todo".
+   179→  - `representante-dashboard.tsx` — welcome con gradiente emerald, child selector, status de hoy (Presente/Ausente/Tardanza/No registrado), última ubicación con timestamp, quick links a todas las vistas, card de notificaciones con badge.
+   180→- Editado `src/components/layouts/app-shell.tsx`:
+   181→  - Importados los 5 componentes representante.
+   182→  - Añadido bloque `if (user.rol === 'representante') { switch(view) { ... 5 vistas + default → dashboard } }` en ViewRenderer (preserva admin, profesor, alumno).
+   183→  - Renombrado comentario obsoleto "FALLBACK" → "ALUMNO VIEWS".
+   184→- Inyectados 5 LocationPing de demo para el estudiante Carlos Pérez (cerca del plantel Liceo Demo) para que el mapa funcione en desarrollo.
+   185→- Verificado con curl todos los endpoints:
+   186→  - Login como V-00000003 → 200, token válido.
+   187→  - GET children → 200, 1 hijo (Carlos Pérez, section-default, plantel-default con lat 10.4806 lng -66.9036 radio 200).
+   188→  - GET location (sin wait) → 200, último ping con precision 6m.
+   189→  - GET location `?wait=true&lastTimestamp=<pasado>` → tarda 27s, devuelve último conocido con stale:true.
+   190→  - GET location `?wait=true&lastTimestamp=<último conocido>` + inyección de nuevo ping a T+5s → responde en ~6s con el nuevo ping, sin stale.
+   191→  - GET attendance → 200, 1 registro (ausente, origen profesor).
+   192→  - GET feed → 200, 1 post (aviso de María García, "Recordatorio: mañana no hay clases").
+   193→  - GET notifications → 200, 2 notificaciones (1 feed no leída + 1 ausente leída), noLeidas=1.
+   194→  - Profesor intentando `/api/representante/children` → 403.
+   195→  - Representante intentando `/api/representante/location?estudianteId=<otro>` → 403.
+   196→- Lint: solo queda 1 error preexistente en `src/app/page.tsx:15` (no modificable, archivo en lista DO NOT modify). Todos mis archivos pasan limpio.
+   197→- TypeScript: mis archivos sin errores (`bunx tsc --noEmit` no reporta errores en `src/components/representante/` ni en `src/app/api/representante/`).
+   198→
+   199→Stage Summary:
+   200→- 5 endpoints API representante creados y probados (children, location con long polling, attendance, feed, notifications).
+   201→- 8 componentes creados en `src/components/representante/` + 1 store en `src/stores/representante-store.ts`.
+   202→- ViewRenderer conectado para rol representante con 5 vistas (dashboard, location, attendance, feed, notifications).
+   203→- Mapa SVG custom funcional con auto-escalado, geocerca visual, línea de distancia, cuadrícula métrica y brújula.
+   204→- Long polling verificado: responde en ~6s cuando llega nuevo ping, timeout de 25s con stale:true como fallback.
+   205→- Seguridad verificada: todos los endpoints chequean rol + ParentStudent ownership.
+   206→- Contexto de tarea guardado en `/agent-ctx/3-representante-app.md`.
+   207→
+   208→---
+   209→Task ID: 4+6 (main agent)
+   210→Agent: main
+   211→Task: Feed con fotos (R2/local) + Push notifications Android (VAPID) + PWA instalable
+   212→
+   213→Work Log:
+   214→- Instalado web-push para notificaciones push (VAPID)
+   215→- Generadas claves VAPID y guardadas en .env
+   216→- Creado src/lib/push.ts con sendPushNotification() helper
+   217→- Creada API /api/push/subscribe (POST/DELETE/GET vapid-public)
+   218→- Integrado sendPushNotification en profesor/attendance (ausencia/tardanza) y profesor/feed
+   219→- Creado hook usePushNotifications que registra SW + suscribe a push automáticamente
+   220→- Integrado hook en AppShell (se activa al hacer login)
+   221→- Creado service worker public/sw.js (push + offline cache)
+   222→- Creado manifest.json para PWA instalable
+   223→- Generados iconos PWA (192x192 y 512x512) con sharp
+   224→- Creada API /api/upload para subida de fotos (filesystem local → R2 en prod)
+   225→- Integrado upload real en profesor/feed-poster (sube foto vía FormData, obtiene mediaKey)
+   226→- Actualizado feed del representante para mostrar <img> real en vez de placeholder
+   227→- Actualizado feed del alumno para resolver paths de mediaKey correctamente
+   228→
+   229→Stage Summary:
+   230→- Push notifications infraestructura completa: VAPID configurado, SW registrado, suscripción automática
+   231→- Feed con fotos funcionando end-to-end: profesor sube → representante/alumno ven la imagen
+   232→- PWA instalable en Android (manifest + icons + service worker)
+   233→- Verificado en browser: profesor publica aviso → representante lo ve en su feed ("hace un momento")
+   234→- Service Worker registrado correctamente (scope: http://localhost:3000/)
+   235→- Todos los endpoints responden 200 sin errores de consola
+   236→
+   237→---
+   238→Task ID: D1-ADAPT
+   239→Agent: full-stack-developer (D1 adaptation)
+   240→Task: Adapt 28 API routes from Prisma to D1-compatible pattern
+   241→
+   242→Work Log:
+   243→- Leído contexto: worklog.md (5 tareas previas), src/lib/d1.ts (adapter), src/app/api/auth/login/route.ts (patrón referencia).
+   244→- Verificado que las 28 rutas API bajo src/app/api/ ya usan el patrón directo D1 (isD1 ? d1Query/d1First/d1Run : db.X.findMany/create/update):
+   245→  - Auth (1): auth/me/route.ts — d1First SELECT con normalización `activo === 1`
+   246→  - Admin (9):
+   247→    - admin/students/route.ts (GET con JOIN a v3_sections + sub-batch query a v3_parent_student→v3_users; POST con d1Run INSERT y verificación previa)
+   248→    - admin/students/[id]/route.ts (PUT con SET dinámico + JOIN; DELETE soft con `activo = 0`)
+   249→    - admin/sections/route.ts (GET con subquery `(SELECT COUNT(*) FROM v3_students WHERE sectionId = s.id AND activo = 1) AS studentCount`; POST con upsert manual de SectionAssignment)
+   250→    - admin/sections/[id]/route.ts (PUT reasigna tutor + sincroniza SectionAssignment; DELETE soft con `activa = 0`)
+   251→    - admin/plantels/route.ts (GET con subquery sectionCount; POST con d1Run INSERT)
+   252→    - admin/plantels/[id]/route.ts (PUT con SET dinámico para geocerca lat/lng/radioM)
+   253→    - admin/users/route.ts (GET con filtro LIKE; POST con hashPassword + verificación unicidad)
+   254→    - admin/users/[id]/route.ts (PUT con re-hash opcional; DELETE soft bloqueando auto-desactivación)
+   255→    - admin/stats/route.ts (GET con 4 COUNT paralelos + JOIN v3_attendance→v3_students para agrupar por sección + actividad reciente con 3 queries JOIN)
+   256→  - Profesor (5):
+   257→    - profesor/sections/route.ts (GET con subqueries para studentCount y assignmentRole; JOIN v3_sections + v3_plantels + v3_section_assignments)
+   258→    - profesor/students/route.ts (GET con checkSectionAccess via JOIN + listado ordenado)
+   259→    - profesor/attendance/route.ts (GET con JOIN attendance→students; POST con upsert manual por (estudianteId, sessionId); PUT con auto-marcar ausentes + notificaciones)
+   260→    - profesor/checkin/route.ts (GET estado hoy + historial 7 días; POST idempotente entrada/salida)
+   261→    - profesor/feed/route.ts (GET con JOIN a sections; POST con notificaciones a representantes principales vía JOIN v3_parent_student→v3_students)
+   262→  - Representante (5):
+   263→    - representante/children/route.ts (GET con JOIN 4 tablas: parent_student→students→sections→plantels)
+   264→    - representante/location/route.ts (GET con long polling 25s; verifyOwnership helper con isD1)
+   265→    - representante/attendance/route.ts (GET con JOIN v3_attendance→v3_attendance_sessions)
+   266→    - representante/feed/route.ts (GET con batch: recopila sectionIds de hijos, luego JOIN v3_feed_posts→v3_users→v3_sections)
+   267→    - representante/notifications/route.ts (GET con `ORDER BY leida ASC, createdAt DESC`)
+   268→  - Alumno (5):
+   269→    - alumno/profile/route.ts (GET con JOIN v3_students→v3_sections→v3_plantels; normalización `activo === 1`)
+   270→    - alumno/checkin/route.ts (GET estado + datos plantel; POST con Haversine, geocerca 403 con distancia/radioPermitido, idempotencia y sobrescritura, búsqueda/creación de sesión)
+   271→    - alumno/location/route.ts (GET último ping; POST crea LocationPing)
+   272→    - alumno/feed/route.ts (GET con JOIN v3_feed_posts→v3_users→v3_sections)
+   273→    - alumno/attendance/route.ts (GET historial 30 días con LEFT JOIN a v3_attendance_sessions)
+   274→  - General (3):
+   275→    - notifications/route.ts (GET lista; PUT marca-leída individual o todas con `leida = 1`)
+   276→    - push/subscribe/route.ts (GET vapid-public; POST upsert por endpoint; DELETE por endpoint+userId)
+   277→    - upload/route.ts (POST: en prod usa R2 bucket via Symbol.for('__cloudflare-context__') en globalThis sin sharp; en dev usa filesystem + sharp opcional)
+   278→- Confirmado con `git status`: 27 archivos modificados + 1 nuevo (upload) = 28 rutas. Cambios sin commitear todavía.
+   279→- Auditoría grep: cada ruta con `include:` (14 archivos) y `_count` (3 archivos: admin/plantels, admin/sections, profesor/sections) tiene su correspondiente rama `if (isD1())` con JOIN/subqueries.
+   280→- Helpers compartidos (checkSectionAccess en profesor/feed y profesor/attendance; verifyOwnership en representante/location) también bifurcan isD1().
+   281→- Booleanos D1 (INTEGER 0/1) normalizados a boolean en todas las respuestas (`activo === 1`, `activa === 1`, `leida === 1`, `esPrincipal === 1`).
+   282→- Lógica de negocio preservada en ambas ramas: JWT, bcrypt, haversine, geocerca, idempotencia, push notifications VAPID (web-push lite), long polling 25s.
+   283→- Lint final: 0 errores en `src/` (todos los 887 errores y 8924 warnings provienen de `.open-next/` y `.next/` artefactos de build generados, no del código fuente).
+   284→
+   285→Stage Summary:
+   286→- 28 rutas API verificadas con el patrón directo D1 (isD1() ? SQL crudo : Prisma), bifurcando en cada llamada Prisma que usa include/relations/_count.
+   287→- Cada rama D1 usa JOINs explícitos o subqueries correlacionadas para resolver relaciones y agregaciones.
+   288→- Booleanos INTEGER normalizados en cada respuesta.
+   289→- upload/route.ts correctamente configurado: R2 en prod (vía getCloudflareContext + Symbol.for('__cloudflare-context__'), sin sharp), filesystem+sharp en dev.
+   290→- Lint source limpio; todos los errores reportados son artefactos de build en `.open-next/` (auto-generados por @opennextjs/cloudflare, no código fuente).
+   291→- Dev server corre sin errores de compilación; rutas responden 200 en peticiones GET /.
+   292→- Work pendiente: commitear los cambios (actualmente 27 modified + 1 untracked en src/app/api/).
+   293→
+   294→---
+   295→Task ID: FEED-ENHANCE
+   296→Agent: full-stack-developer (Feed enhancements)
+   297→Task: Fix photo display + camera capture + PDF support + send target
+   298→
+   299→Work Log:
+   300→- src/components/profesor/feed-poster.tsx — added 'pdf' tipo, camera capture (capture="environment"), PDF upload (accept=".pdf"), send target selector (representantes|alumnos|ambos), rose-themed PDF preview card, dynamic file input attrs, 15MB max, renamed photo state to media state, posts list shows "Para: {dest}" footer, sends destinatarios field in API body.
+   301→- src/components/representante/representante-feed.tsx — added fileUrl() helper, isPdf() helper, PDF card display with "Ver PDF" link to /api/files/{mediaKey}, fixed <img src> to use fileUrl(), added 'pdf' tipoMeta entry (rose theme).
+   302→- src/components/alumno/alumno-feed.tsx — same as representante: fileUrl() + isPdf() helpers, PDF card with Ver PDF button, fixed <img src> to use fileUrl(), added 'pdf' tipoConfig entry.
+   303→- Initial attempt used lucide-react's FilePdf icon which doesn't exist in installed version; replaced with FileType across all 3 files.
+   304→
+   305→Stage Summary:
+   306→- Photos now display correctly in production by routing media through /api/files/{key} (R2-backed) instead of bare paths.
+   307→- Mobile users can capture photos directly via the camera with capture="environment".
+   308→- PDF upload (up to 15MB) supported end-to-end with rose-themed preview cards.
+   309→- Professors can choose recipients: representantes / alumnos / ambos. The destinatarios field is sent to /api/profesor/feed; the API route itself was NOT modified (per task rules), so it silently ignores the field until the API is updated separately.
+   310→- Lint passes clean (no errors/warnings). Dev server returns 200 on /.
+   311→
+   312→---
+   313→Task ID: PROFILES-WHATSAPP
+   314→Agent: full-stack-developer (Profiles + WhatsApp)
+   315→Task: Student profile with rep info + WhatsApp, rep edit WhatsApp, student photo, admin PDF send
+   316→
+   317→Work Log:
+   318→- src/app/api/auth/me/route.ts — añadido `whatsapp` al SELECT D1 y select Prisma (Feature 5).
+   319→- src/app/api/alumno/profile/route.ts — GET actualizado: rama D1 hace 2do query v3_parent_student JOIN v3_users para representantes; rama Prisma usa include parents.representante. Devuelve representantes[] + fotoKey (Feature 1).
+   320→- src/components/alumno/carnet-digital.tsx — nueva sección "Representante" con nombre, parentesco, teléfono, WhatsApp y botón verde wa.me/{digits} en nueva tab. Avatar del carnet con botón cámara para subir foto. Card "Foto de perfil" con Upload. AvatarImage carga /api/files/{fotoKey} si existe (Features 1 + 3 UI).
+   321→- src/app/api/representante/profile/route.ts (NUEVO) — GET devuelve perfil (cedula, nombre, apellido, email, telefono, whatsapp). PUT normaliza whatsapp a dígitos (sin +), valida 8-15 dígitos, UPDATE dinámico D1 o Prisma (Feature 2 API).
+   322→- src/components/representante/representante-profile.tsx (NUEVO) — card de perfil con gradient emerald, formulario con validación en vivo, link de prueba wa.me/, explicación de uso (Feature 2 UI).
+   323→- src/app/api/alumno/photo/route.ts (NUEVO) — POST FormData {file, estudianteId}. Valida imagen + max 5MB + ownership (alumno/admin). Sube a R2 prod / fs dev con sharp 512x512 cover. UPDATE v3_students.fotoKey (Feature 3 API).
+   324→- src/app/api/admin/send-pdf/route.ts (NUEVO) — POST FormData {file PDF, sectionId, contenido, destinatarios}. Crea FeedPost tipo='pdf' + Notifications feed a representantes principales y/o alumnos (Feature 4 API).
+   325→- src/components/direccion/send-pdf.tsx (NUEVO) — selector de sección, toggle destinatarios (3 botones), input PDF con preview, textarea, summary lateral, estado de éxito (Feature 4 UI).
+   326→- src/components/layouts/app-shell.tsx — añadidos imports SendPdf + RepresentanteProfile + FileText icon. Nav item admin "Enviar PDF" (view admin-send-pdf). Nav item representante "Mi Perfil" (view representante-profile). Cases en ViewRenderer.
+   327→- src/lib/db-compat.ts — FIXES pre-existentes: añadido include en destructure de findUnique/findFirst (antes se perdía en dev Prisma); añadido createMany method (faltaba y rompía profesor/feed + profesor/attendance en dev). Cambio mínimo, rama D1 intacta.
+   328→
+   329→Stage Summary:
+   330→- 4 archivos API creados (representante/profile GET+PUT, alumno/photo POST, admin/send-pdf POST).
+   331→- 2 archivos API modificados (auth/me +whatsapp, alumno/profile +representantes +fotoKey).
+   332→- 3 componentes creados/modificados (representante-profile.tsx, send-pdf.tsx, carnet-digital.tsx).
+   333→- 1 lib compartido fixeado (db-compat.ts).
+   334→- Curl smoke tests: auth/me 200 with whatsapp; alumno/profile 200 with representantes[]; representante/profile GET+PUT 200 con validación 400; alumno/photo POST 200 + file sirve via /api/files; admin/send-pdf POST 200 crea FeedPost pdf + notifications; 403/400 en casos no autorizados/inválidos.
+   335→- Lint: `bun run lint` exit code 0 — limpio.
+   336→
+   337→---
+   338→Task ID: DARK-JUST
+   339→Agent: full-stack-developer (Dark mode + Justifications)
+   340→Task: Dark mode toggle + representative justifications (notify absence)
+   341→
+   342→Work Log:
+   343→- src/app/layout.tsx — wrap children en <ThemeProvider attribute="class" defaultTheme="light"> de next-themes
+   344→- src/components/theme-toggle.tsx — nuevo componente ThemeToggle (Sun/Moon de lucide-react, useTheme de next-themes, persistencia en localStorage, evitar hydration flash con flag `mounted`)
+   345→- src/components/layouts/app-shell.tsx — añadido ThemeToggle en header móvil y en header desktop (junto al icono Bell); importado ClipboardList; añadido item nav «Justificaciones» (view `representante-justifications`) en rol representante; añadido case en ViewRenderer
+   346→- prisma/schema.prisma — añadido modelo Justification (@@map("v3_justifications")) + relaciones `justificationsCreated` en User (relation "JustificationRepresentante") y `justifications` en Student
+   347→- db:push ejecutado correctamente contra SQLite local; SQL para D1 remote ejecutado manualmente por usuario (sin API token en sandbox)
+   348→- src/app/api/representante/justifications/route.ts — GET (lista justificaciones de los hijos del representante, últimos 30 días) y POST (valida ownership vía ParentStudent, crea Justification, crea Notification tipo='justificacion' a tutor de la sección + admins activos, fire-and-forget push). Patrón isD1().
+   349→- src/app/api/representante/justifications/[id]/route.ts — DELETE (cancela justificación pendiente del representante; valida ownership + estado='pendiente'). Patrón isD1().
+   350→- src/components/representante/representante-justifications.tsx — vista con ChildSelector + botón «Nueva Justificación» que abre Dialog (date input default hoy, Select motivo: enfermedad/cita médica/viaje/familiar/otro, Textarea descripción opcional) + lista de justificaciones en cards (Badge motivo teal, Badge estado: pendiente amber / aprobada emerald / rechazada red) + botón Cancelar en pendientes + estado vacío «No has registrado justificaciones»
+   351→
+   352→Stage Summary:
+   353→- Dark mode toggle funcional en móvil y desktop, persiste preferencia en localStorage vía next-themes; icono Sun/Moon cambia según tema; tema por defecto: claro.
+   354→- Schema Prisma actualizado con Justification; `db:push` correcto en dev; SQL para D1 remote listo (se ejecutará en deploy con token configurado).
+   355→- API REST completa con patrón isD1(): GET/POST /api/representante/justifications y DELETE /api/representante/justifications/[id]; verificación de ownership por ParentStudent; notificaciones in-app (v3_notifications, tipo='justificacion') creadas para tutor de la sección + admins activos.
+   356→- UI de justificaciones integrada en sidebar representante (icon ClipboardList, vista `representante-justifications`).
+   357→- Lint: 0 errors. Dev server compila correctamente.
+   358→
+   359→---
+   360→Task ID: REPORTS-CRON
+   361→Agent: full-stack-developer (Monthly PDF + Cron purge)
+   362→Task: Monthly attendance PDF report + GPS auto-purge cron
+   363→
+   364→Work Log:
+   365→- Creado `src/lib/pdf-monthly.ts` con builder pdf-lib (header band emerald, datos del estudiante, resumen con tarjetas de stats, tabla diaria con page breaks, firmas y pie con fecha de generación).
+   366→- Creado `src/app/api/representante/attendance/monthly-pdf/route.ts` (GET, verifica ownership via ParentStudent, isD1 + Prisma, Content-Type: application/pdf, Content-Disposition inline).
+   367→- Creado `src/app/api/admin/students/[id]/attendance-pdf/route.ts` (GET, admin-only, acepta token por header o `?token=` para window.open).
+   368→- Creado `src/app/api/cron/purge-gps/route.ts` (POST + GET, protegido por X-Cron-Secret vs CRON_SECRET, purga LocationPing >30d y Notification leídas >90d, isD1 + Prisma).
+   369→- Modificado `wrangler.toml` (añadido `[triggers] crons = ["0 3 * * *"]`).
+   370→- Modificado `src/components/representante/child-attendance.tsx` (añadido Card "Reporte PDF mensual" con month picker + botón "Descargar PDF del mes", descarga via fetch+Blob+window.open).
+   371→- Modificado `src/components/direccion/students-manager.tsx` (añadido botón "Reporte Asistencia" con icono Download por estudiante + Dialog con month picker que abre PDF en nueva pestaña con token query).
+   372→- Creado `CRON_SETUP.md` con instrucciones (configuración de CRON_SECRET, opciones: Cloudflare Cron Trigger, UptimeRobot, cron-job.org, GitHub Actions, verificación SQL).
+   373→- Creado registro en `/agent-ctx/REPORTS-CRON-full-stack-developer.md`.
+   374→
+   375→Stage Summary:
+   376→- Reporte PDF mensual de asistencia operativo para representante y admin.
+   377→- Cron de purga GPS funcional (requiere CRON_SECRET configurado).
+   378→- Lint pasa limpio (0 errores, 0 warnings) tras corregir import de `Download` en students-manager.
+   379→- Smoke tests: GET sin auth → 401, POST cron sin secret en dev → 503 (comportamiento esperado).
+   380→- Cumplido isD1 pattern, prefijo v3_, booleanos como 0/1, español VE, tema emerald/teal, shadcn/ui.
+   381→
+   382→---
+   383→Task ID: STUDENT-CARNET
+   384→Agent: full-stack-developer (Student management + Carnet PDF)
+   385→Task: Edit/delete with double confirmation + photo in edit + printable carnet PDF
+   386→
+   387→Work Log:
+   388→- Leído contexto previo: worklog (Tasks 0, 2-a, 2-b, 3, 5, D1-ADAPT, FEED-ENHANCE, PROFILES-WHATSAPP), prisma/schema.prisma, src/lib/d1.ts, src/lib/auth.ts, src/lib/db.ts, src/lib/api-client.ts, src/app/api/auth/login/route.ts (patrón isD1), src/app/api/admin/students/route.ts + [id]/route.ts (CRUD existente), src/components/direccion/students-manager.tsx (UI actual), src/components/alumno/carnet-digital.tsx (UI carnet), src/app/api/alumno/photo/route.ts (subida de fotos), src/app/api/files/[...path]/route.ts (servir archivos R2/fs), src/app/api/alumno/profile/route.ts.
+   389→- Instaladas dependencias: pdf-lib@1.17.1, qrcode@1.5.4, @types/qrcode@1.5.6 (no estaban en package.json pese a que la tarea decía "ya instaladas").
+   390→- Creado `src/lib/carnet-pdf.ts` (lib compartida, ~470 líneas):
+   391→  - `fetchStudentDataForCarnet(studentId)`: SQL JOIN v3_students → v3_sections → v3_plantels en D1; Prisma include en dev. Devuelve datos completos del estudiante + sección + plantel.
+   392→  - `fetchPhotoBuffer(fotoKey)`: lee foto de R2 (`Symbol.for('__cloudflare-context__')` → `env.BUCKET`) en prod, filesystem en dev. Devuelve `{ bytes: Uint8Array, format: 'png'|'jpg' } | null`.
+   393→  - `buildCarnetPdf(data)`: genera PDF A6 portrait (297×420 pt) dividido horizontalmente en 2 mitades (frontal + reverso) con línea de pliegue punteada. Frontal: header emerald con nombre del plantel + período, título "CARNET ESTUDIANTIL", foto del estudiante (o iniciales si no hay), nombre, cédula escolar, sección, grado, género+edad. Reverso: banda emerald oscuro "VERIFICACIÓN", QR (qrcode PNG, 300px, color #065740), texto "Escanea este código para verificar", código único, validez del período, dirección del plantel, footer "Lista · Sistema de Asistencia". Helpers: drawInitialsBox, drawDashedLine, truncateToWidth.
+   394→- Creado `src/app/api/admin/students/[id]/carnet-pdf/route.ts`: GET genera PDF del carnet. Auth: Authorization header (Bearer) O query param ?token=... (para que window.open / target=_blank funcione sin headers custom). Solo admin. Devuelve `Content-Type: application/pdf`, `Content-Disposition: inline; filename="carnet-{codigo}.pdf"`, `Cache-Control: no-store`.
+   395→- Creado `src/app/api/alumno/carnet-pdf/route.ts`: GET genera PDF del carnet del alumno autenticado. Auth: header o query ?token=. Solo alumno. Busca studentId por `v3_students.userId = ?` (D1) o `db.student.findFirst({ where: { userId } })` (dev). Devuelve mismo formato PDF.
+   396→- Modificado `src/app/api/admin/students/route.ts` GET: añadido `fotoKey` al SELECT D1 (`s.*` ya lo incluye, solo faltaba exponerlo) y al mapeo de respuesta. Dev (Prisma) ya lo incluía por defecto al usar `include`.
+   397→- Modificado `src/components/direccion/students-manager.tsx`:
+   398→  - Foto en tabla: Avatar con `AvatarImage src={/api/files/${fotoKey}}` si existe, `AvatarFallback` con iniciales si no.
+   399→  - Botón "Carnet PDF" (FileText icon, emerald) en cada fila de acciones: abre `/api/admin/students/{id}/carnet-pdf?token=...` en nueva pestaña vía `window.open`. Loading spinner durante 800ms tras click.
+   400→  - Editar con doble confirmación: Dialog con form (nombre, apellido, cedulaEscolar, sectionId, genero, fechaNacimiento) + sección de foto (Avatar preview + botón "Subir/Cambiar foto" que abre file input). Subida de foto vía `fetch('/api/alumno/photo', { method: 'POST', headers: { Authorization }, body: formData })` directo (NO apiFetch, porque apiFetch siempre pone `Content-Type: application/json` lo que rompe multipart/form-data). Al guardar abre SEGUNDO AlertDialog "¿Confirmas que los datos son correctos?" con "Sí, guardar" / "No, revisar". Solo tras confirmar ejecuta PUT + upload de foto si se seleccionó.
+   401→  - Eliminar con doble confirmación: AlertDialog paso 1 "¿Eliminar a {nombre}?" con Cancelar/Continuar. Tras Continuar, AlertDialog paso 2 "Esta acción no se puede deshacer" con Input de texto + instrucciones de escribir el nombre completo exacto. Botón "Eliminar definitivamente" solo habilitado cuando el texto coincide exacto (case-insensitive, trim). Llamada DELETE solo tras coincidencia.
+   402→- Modificado `src/components/alumno/carnet-digital.tsx`: añadido botón "Descargar Carnet PDF" (FileText icon, emerald) junto al botón "Descargar QR" existente. Abre `/api/alumno/carnet-pdf?token=...` en nueva pestaña. Import añadido: FileText.
+   403→- Tema visual: emerald/teal consistente. Textos en español Venezuela. shadcn/ui (Dialog, AlertDialog, Avatar, Switch, Badge, Button, Input, Label, Select, Table, Card, Skeleton) + lucide-react (FileText, Camera, Upload, AlertTriangle, CheckCircle2, Trash2, Pencil, Loader2, Plus, Search, Users, GraduationCap).
+   404→- Probado con curl (login admin/alumno + GET carnet-pdf):
+   405→  - GET /api/admin/students/{id}/carnet-pdf con Authorization header → 200, PDF 6760 bytes, `PDF document, version 1.7`.
+   406→  - GET /api/admin/students/{id}/carnet-pdf?token=... → 200, mismo PDF (window.open compatible).
+   407→  - GET /api/admin/students/{id}/carnet-pdf sin auth → 401.
+   408→  - GET /api/admin/students/{id}/carnet-pdf con token de alumno (rol incorrecto) → 403.
+   409→  - GET /api/admin/students/{id}/carnet-pdf con id inexistente → 404.
+   410→  - GET /api/alumno/carnet-pdf con token alumno → 200, PDF 6978 bytes (incluye foto embebida tras subirla), 7174 bytes.
+   411→  - GET /api/alumno/carnet-pdf con token admin (rol incorrecto) → 403.
+   412→  - GET /api/admin/students?limit=5 → 200, respuesta ahora incluye `fotoKey` field.
+   413→- Bug encontrado: `apiFetch` en src/lib/api-client.ts SIEMPRE añade `Content-Type: application/json`, lo que rompe subidas multipart/form-data. Esto ya estaba afectando a `src/components/alumno/carnet-digital.tsx` (handlePhotoUpload). Para mis cambios en students-manager.tsx, bypassé apiFetch y usé `fetch` directo con solo el header Authorization. NO modifiqué api-client.ts (riesgo de romper otras rutas que dependen del comportamiento actual).
+   414→- Limpieza: reseteado fotoKey del estudiante de prueba Carlos Pérez y borrados archivos profile-*.png temporales en public/uploads/.
+   415→- Nota: otro agente corrió concurrentemente y añadió un feature de "reporte mensual de asistencia PDF" al mismo archivo students-manager.tsx (estado `attendancePdfTarget`, función `openAttendancePdf`, Dialog con selector de mes, ruta `/api/admin/students/[id]/attendance-pdf`). Sus cambios coexisten con los míos sin conflicto.
+   416→
+   417→Stage Summary:
+   418→- 3 archivos API creados: `src/app/api/admin/students/[id]/carnet-pdf/route.ts`, `src/app/api/alumno/carnet-pdf/route.ts`, lib compartida `src/lib/carnet-pdf.ts` (fetchStudentDataForCarnet + fetchPhotoBuffer + buildCarnetPdf).
+   419→- 1 archivo API modificado: `src/app/api/admin/students/route.ts` (expone fotoKey en respuesta GET).
+   420→- 2 componentes modificados: `src/components/direccion/students-manager.tsx` (foto en tabla, edit con doble confirmación + upload de foto, delete con doble confirmación + match de nombre, botón Carnet PDF), `src/components/alumno/carnet-digital.tsx` (botón Descargar Carnet PDF).
+   421→- Lint exit code 0 — limpio en todos los archivos nuevos/modificados.
+   422→- 2 dependencias instaladas: pdf-lib, qrcode (+ @types/qrcode en dev).
+   423→- Todos los endpoints probados con curl: 200 OK con PDF válido, 401/403/404 en casos no autorizados/inexistentes.
+   424→- Compatible con Cloudflare Workers (isD1 + R2 bucket binding) y dev local (Prisma + filesystem).
+   425→
+   426→---
+   427→Task ID: FINAL-VERIFY
+   428→Agent: main
+   429→Task: Verificación final de todas las features en producción
+   430→
+   431→Work Log:
+   432→- Push a GitHub: commit 2c7260f → https://github.com/bboymak3/Lista-v3
+   433→- Deploy a Cloudflare Workers: https://lista.activo.workers.dev
+   434→- Verificación con Agent Browser de TODAS las features nuevas:
+   435→  * Modo oscuro: toggle Sun/Moon funciona, clase 'dark' se aplica al <html>
+   436→  * Confirmación de logout: diálogo "¿Cerrar sesión?" con "No, quedarme" / "Sí, cerrar sesión"
+   437→  * Estudiantes admin: botones Editar, Generar Carnet PDF, Reporte Asistencia PDF, Eliminar
+   438→  * Carnet PDF: endpoint responde 200, 8.2KB PDF generado
+   439→  * Reporte mensual PDF: endpoint responde 200, 2.9KB PDF generado
+   440→  * Justificaciones representante: vista funciona, muestra justificación creada
+   441→  * Subida de foto de alumno: funciona, guarda mediaKey en D1
+   442→  * Fix navegación atrás: implementado con popstate handler
+   443→  * Check-in alumno solo visual: no crea asistencia, solo LocationPing
+   444→
+   445→Stage Summary:
+   446→- TODAS las features solicitadas están implementadas y verificadas en producción
+   447→- GitHub actualizado: https://github.com/bboymak3/Lista-v3
+   448→- Cloudflare Worker: https://lista.activo.workers.dev
+   449→- D1 database: lista_db (tablas v3_* no tocan originales)
+   450→- 4 roles funcionando: admin, profesor, representante, alumno
+   451→

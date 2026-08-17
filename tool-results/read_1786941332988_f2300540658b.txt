@@ -1,0 +1,1023 @@
+     1→'use client'
+     2→
+     3→import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+     4→import { api } from '@/lib/api-client'
+     5→import { useAuthStore } from '@/stores/auth-store'
+     6→import { toast } from 'sonner'
+     7→import { Button } from '@/components/ui/button'
+     8→import { Input } from '@/components/ui/input'
+     9→import { Label } from '@/components/ui/label'
+    10→import { Card, CardContent, CardHeader } from '@/components/ui/card'
+    11→import {
+    12→  Table,
+    13→  TableBody,
+    14→  TableCell,
+    15→  TableHead,
+    16→  TableHeader,
+    17→  TableRow,
+    18→} from '@/components/ui/table'
+    19→import {
+    20→  Select,
+    21→  SelectContent,
+    22→  SelectItem,
+    23→  SelectTrigger,
+    24→  SelectValue,
+    25→} from '@/components/ui/select'
+    26→import {
+    27→  Dialog,
+    28→  DialogContent,
+    29→  DialogDescription,
+    30→  DialogFooter,
+    31→  DialogHeader,
+    32→  DialogTitle,
+    33→} from '@/components/ui/dialog'
+    34→import {
+    35→  AlertDialog,
+    36→  AlertDialogAction,
+    37→  AlertDialogCancel,
+    38→  AlertDialogContent,
+    39→  AlertDialogDescription,
+    40→  AlertDialogFooter,
+    41→  AlertDialogHeader,
+    42→  AlertDialogTitle,
+    43→} from '@/components/ui/alert-dialog'
+    44→import { Switch } from '@/components/ui/switch'
+    45→import { Badge } from '@/components/ui/badge'
+    46→import { Skeleton } from '@/components/ui/skeleton'
+    47→import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+    48→import {
+    49→  Plus,
+    50→  Search,
+    51→  Pencil,
+    52→  Trash2,
+    53→  GraduationCap,
+    54→  Loader2,
+    55→  Users,
+    56→  FileText,
+    57→  Camera,
+    58→  Upload,
+    59→  AlertTriangle,
+    60→  CheckCircle2,
+    61→  Download,
+    62→} from 'lucide-react'
+    63→
+    64→interface SectionOption {
+    65→  id: string
+    66→  nombre: string
+    67→  grado: string
+    68→  turno: string
+    69→}
+    70→
+    71→interface StudentRow {
+    72→  id: string
+    73→  codigoUnico: string
+    74→  cedulaEscolar: string | null
+    75→  nombre: string
+    76→  apellido: string
+    77→  fechaNacimiento: string | null
+    78→  genero: string | null
+    79→  sectionId: string
+    80→  fotoKey: string | null
+    81→  qrCode?: string
+    82→  section: { id: string; nombre: string; grado: string; turno: string } | null
+    83→  activo: boolean
+    84→}
+    85→
+    86→interface StudentsResponse {
+    87→  data: StudentRow[]
+    88→  total: number
+    89→  page: number
+    90→  limit: number
+    91→  totalPages: number
+    92→}
+    93→
+    94→const turnoLabel: Record<string, string> = {
+    95→  manana: 'Mañana',
+    96→  tarde: 'Tarde',
+    97→  nocturno: 'Nocturno',
+    98→}
+    99→
+   100→const generoLabel: Record<string, string> = {
+   101→  M: 'Masculino',
+   102→  F: 'Femenino',
+   103→  O: 'Otro',
+   104→}
+   105→
+   106→function generateCodigoUnico() {
+   107→  // Codigo único basado en timestamp + random
+   108→  return `EST-${Date.now().toString(36).toUpperCase()}${Math.random()
+   109→    .toString(36)
+   110→    .slice(2, 6)
+   111→    .toUpperCase()}`
+   112→}
+   113→
+   114→interface StudentFormValues {
+   115→  nombre: string
+   116→  apellido: string
+   117→  cedulaEscolar: string
+   118→  sectionId: string
+   119→  genero: string
+   120→  fechaNacimiento: string
+   121→}
+   122→
+   123→function emptyForm(sectionDefault = ''): StudentFormValues {
+   124→  return {
+   125→    nombre: '',
+   126→    apellido: '',
+   127→    cedulaEscolar: '',
+   128→    sectionId: sectionDefault,
+   129→    genero: '',
+   130→    fechaNacimiento: '',
+   131→  }
+   132→}
+   133→
+   134→export function StudentsManager() {
+   135→  const [students, setStudents] = useState<StudentRow[]>([])
+   136→  const [sections, setSections] = useState<SectionOption[]>([])
+   137→  const [loading, setLoading] = useState(true)
+   138→  const [search, setSearch] = useState('')
+   139→  const [sectionFilter, setSectionFilter] = useState<string>('all')
+   140→  const [dialogOpen, setDialogOpen] = useState(false)
+   141→  const [editing, setEditing] = useState<StudentRow | null>(null)
+   142→  const [form, setForm] = useState<StudentFormValues>(emptyForm())
+   143→  const [submitting, setSubmitting] = useState(false)
+   144→  const [togglingId, setTogglingId] = useState<string | null>(null)
+   145→
+   146→  // Photo upload (in edit dialog)
+   147→  const [photoFile, setPhotoFile] = useState<File | null>(null)
+   148→  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+   149→  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+   150→  const photoInputRef = useRef<HTMLInputElement>(null)
+   151→
+   152→  // Edit double confirmation
+   153→  const [confirmEditOpen, setConfirmEditOpen] = useState(false)
+   154→
+   155→  // Delete double confirmation
+   156→  const [deleteTarget, setDeleteTarget] = useState<StudentRow | null>(null)
+   157→  const [deleteConfirmName, setDeleteConfirmName] = useState('')
+   158→  const [deleteStep2, setDeleteStep2] = useState(false)
+   159→  const [deleting, setDeleting] = useState(false)
+   160→
+   161→  // Carnet PDF loading
+   162→  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null)
+   163→
+   164→  // Monthly attendance PDF dialog
+   165→  const [attendancePdfTarget, setAttendancePdfTarget] = useState<StudentRow | null>(null)
+   166→  const todayForMonth = new Date()
+   167→  const defaultMonth = `${todayForMonth.getFullYear()}-${String(
+   168→    todayForMonth.getMonth() + 1
+   169→  ).padStart(2, '0')}`
+   170→  const [attendanceMonth, setAttendanceMonth] = useState(defaultMonth)
+   171→
+   172→  const openAttendancePdf = async (s: StudentRow) => {
+   173→    if (!attendanceMonth || !/^\d{4}-\d{2}$/.test(attendanceMonth)) {
+   174→      toast.error('Selecciona un mes válido (YYYY-MM)')
+   175→      return
+   176→    }
+   177→    setPdfLoadingId(s.id)
+   178→    try {
+   179→      const { useAuthStore } = await import('@/stores/auth-store')
+   180→      const token = useAuthStore.getState().token
+   181→      const url = `/api/admin/students/${s.id}/attendance-pdf?month=${attendanceMonth}${
+   182→        token ? `&token=${encodeURIComponent(token)}` : ''
+   183→      }`
+   184→      window.open(url, '_blank', 'noopener,noreferrer')
+   185→      setAttendancePdfTarget(null)
+   186→      toast.success('Generando reporte de asistencia…')
+   187→    } catch (e: any) {
+   188→      toast.error('No se pudo generar el reporte: ' + (e.message || ''))
+   189→    } finally {
+   190→      setTimeout(() => setPdfLoadingId(null), 800)
+   191→    }
+   192→  }
+   193→
+   194→  const loadSections = useCallback(async () => {
+   195→    try {
+   196→      const res = await api.get<{ data: SectionOption[] }>('/admin/sections')
+   197→      setSections(res.data || [])
+   198→    } catch (e: any) {
+   199→      toast.error('Error al cargar secciones', { description: e.message })
+   200→    }
+   201→  }, [])
+   202→
+   203→  const loadStudents = useCallback(async () => {
+   204→    setLoading(true)
+   205→    try {
+   206→      const params = new URLSearchParams()
+   207→      params.set('limit', '100')
+   208→      if (search) params.set('search', search)
+   209→      if (sectionFilter !== 'all') params.set('sectionId', sectionFilter)
+   210→      params.set('includeInactive', 'true')
+   211→      const res = await api.get<StudentsResponse>(`/admin/students?${params.toString()}`)
+   212→      setStudents(res.data || [])
+   213→    } catch (e: any) {
+   214→      toast.error('Error al cargar estudiantes', { description: e.message })
+   215→    } finally {
+   216→      setLoading(false)
+   217→    }
+   218→  }, [search, sectionFilter])
+   219→
+   220→  useEffect(() => {
+   221→    loadSections()
+   222→  }, [loadSections])
+   223→
+   224→  useEffect(() => {
+   225→    const t = setTimeout(loadStudents, 250)
+   226→    return () => clearTimeout(t)
+   227→  }, [loadStudents])
+   228→
+   229→  const resetPhotoState = () => {
+   230→    setPhotoFile(null)
+   231→    setPhotoPreview(null)
+   232→    setUploadingPhoto(false)
+   233→    if (photoInputRef.current) photoInputRef.current.value = ''
+   234→  }
+   235→
+   236→  const openCreate = () => {
+   237→    setEditing(null)
+   238→    setForm(emptyForm(sections[0]?.id || ''))
+   239→    resetPhotoState()
+   240→    setDialogOpen(true)
+   241→  }
+   242→
+   243→  const openEdit = (s: StudentRow) => {
+   244→    setEditing(s)
+   245→    setForm({
+   246→      nombre: s.nombre,
+   247→      apellido: s.apellido,
+   248→      cedulaEscolar: s.cedulaEscolar || '',
+   249→      sectionId: s.sectionId,
+   250→      genero: s.genero || '',
+   251→      fechaNacimiento: s.fechaNacimiento || '',
+   252→    })
+   253→    resetPhotoState()
+   254→    setPhotoPreview(s.fotoKey ? `/api/files/${s.fotoKey}` : null)
+   255→    setDialogOpen(true)
+   256→  }
+   257→
+   258→  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+   259→    const file = e.target.files?.[0]
+   260→    if (!file) return
+   261→    if (!file.type.startsWith('image/')) {
+   262→      toast.error('Solo se permiten imágenes')
+   263→      return
+   264→    }
+   265→    if (file.size > 5 * 1024 * 1024) {
+   266→      toast.error('La imagen no debe superar 5MB')
+   267→      return
+   268→    }
+   269→    setPhotoFile(file)
+   270→    const url = URL.createObjectURL(file)
+   271→    setPhotoPreview(url)
+   272→  }
+   273→
+   274→  // Step 1 of edit: validate form → open second confirmation dialog
+   275→  const handleSubmitClick = (e: React.FormEvent) => {
+   276→    e.preventDefault()
+   277→    if (!form.nombre || !form.apellido || !form.sectionId) {
+   278→      toast.error('Nombre, apellido y sección son obligatorios')
+   279→      return
+   280→    }
+   281→    setConfirmEditOpen(true)
+   282→  }
+   283→
+   284→  // Step 2 of edit: actually save (after second confirmation)
+   285→  const performSave = async () => {
+   286→    setSubmitting(true)
+   287→    try {
+   288→      // 1. If a new photo was selected, upload it first
+   289→      let newFotoKey: string | null = null
+   290→      if (photoFile && editing) {
+   291→        setUploadingPhoto(true)
+   292→        try {
+   293→          const token = useAuthStore.getState().token
+   294→          const formData = new FormData()
+   295→          formData.append('file', photoFile)
+   296→          formData.append('estudianteId', editing.id)
+   297→          // Use plain fetch (NOT apiFetch) so the browser sets the correct
+   298→          // multipart/form-data Content-Type automatically with the boundary.
+   299→          const uploadRes = await fetch('/api/alumno/photo', {
+   300→            method: 'POST',
+   301→            headers: token ? { Authorization: `Bearer ${token}` } : {},
+   302→            body: formData,
+   303→          })
+   304→          if (!uploadRes.ok) {
+   305→            const errBody = await uploadRes.json().catch(() => ({}))
+   306→            throw new Error((errBody as any).error || `HTTP ${uploadRes.status}`)
+   307→          }
+   308→          const data = (await uploadRes.json()) as { mediaKey: string }
+   309→          newFotoKey = data.mediaKey
+   310→        } catch (err: any) {
+   311→          toast.error('No se pudo subir la foto: ' + err.message)
+   312→          setSubmitting(false)
+   313→          setUploadingPhoto(false)
+   314→          return
+   315→        } finally {
+   316→          setUploadingPhoto(false)
+   317→        }
+   318→      }
+   319→
+   320→      // 2. PUT the student data
+   321→      if (editing) {
+   322→        await api.put(`/admin/students/${editing.id}`, {
+   323→          nombre: form.nombre,
+   324→          apellido: form.apellido,
+   325→          cedulaEscolar: form.cedulaEscolar || null,
+   326→          sectionId: form.sectionId,
+   327→          genero: form.genero || null,
+   328→          fechaNacimiento: form.fechaNacimiento || null,
+   329→        })
+   330→        toast.success('Estudiante actualizado')
+   331→      } else {
+   332→        await api.post('/admin/students', {
+   333→          codigoUnico: generateCodigoUnico(),
+   334→          nombre: form.nombre,
+   335→          apellido: form.apellido,
+   336→          cedulaEscolar: form.cedulaEscolar || null,
+   337→          sectionId: form.sectionId,
+   338→          genero: form.genero || null,
+   339→          fechaNacimiento: form.fechaNacimiento || null,
+   340→        })
+   341→        toast.success('Estudiante creado')
+   342→      }
+   343→
+   344→      // If photo uploaded for a brand-new student, we'd need the created id — for now only edit supports photo upload (per spec)
+   345→      if (newFotoKey) {
+   346→        toast.success('Foto actualizada')
+   347→      }
+   348→
+   349→      setConfirmEditOpen(false)
+   350→      setDialogOpen(false)
+   351→      resetPhotoState()
+   352→      loadStudents()
+   353→    } catch (e: any) {
+   354→      toast.error(e.message || 'Error al guardar estudiante')
+   355→    } finally {
+   356→      setSubmitting(false)
+   357→    }
+   358→  }
+   359→
+   360→  // === Delete flow (double confirmation) ===
+   361→  const openDeleteStep1 = (s: StudentRow) => {
+   362→    setDeleteTarget(s)
+   363→    setDeleteConfirmName('')
+   364→    setDeleteStep2(false)
+   365→  }
+   366→
+   367→  const advanceToDeleteStep2 = () => {
+   368→    setDeleteStep2(true)
+   369→    setDeleteConfirmName('')
+   370→  }
+   371→
+   372→  const cancelDelete = () => {
+   373→    setDeleteTarget(null)
+   374→    setDeleteStep2(false)
+   375→    setDeleteConfirmName('')
+   376→  }
+   377→
+   378→  const performDelete = async () => {
+   379→    if (!deleteTarget) return
+   380→    const expected = `${deleteTarget.nombre} ${deleteTarget.apellido}`.trim().toLowerCase()
+   381→    if (deleteConfirmName.trim().toLowerCase() !== expected) {
+   382→      toast.error('El nombre no coincide')
+   383→      return
+   384→    }
+   385→    setDeleting(true)
+   386→    try {
+   387→      await api.delete(`/admin/students/${deleteTarget.id}`)
+   388→      toast.success('Estudiante eliminado')
+   389→      cancelDelete()
+   390→      loadStudents()
+   391→    } catch (e: any) {
+   392→      toast.error(e.message || 'Error al eliminar')
+   393→    } finally {
+   394→      setDeleting(false)
+   395→    }
+   396→  }
+   397→
+   398→  const handleToggleActivo = async (s: StudentRow) => {
+   399→    setTogglingId(s.id)
+   400→    try {
+   401→      await api.put(`/admin/students/${s.id}`, { activo: !s.activo })
+   402→      setStudents((prev) =>
+   403→        prev.map((row) => (row.id === s.id ? { ...row, activo: !row.activo } : row))
+   404→      )
+   405→      toast.success(s.activo ? 'Estudiante desactivado' : 'Estudiante activado')
+   406→    } catch (e: any) {
+   407→      toast.error(e.message || 'Error al cambiar estado')
+   408→    } finally {
+   409→      setTogglingId(null)
+   410→    }
+   411→  }
+   412→
+   413→  // === Carnet PDF download ===
+   414→  const openCarnetPdf = (s: StudentRow) => {
+   415→    setPdfLoadingId(s.id)
+   416→    try {
+   417→      const token = useAuthStore.getState().token
+   418→      const url = `/api/admin/students/${s.id}/carnet-pdf${token ? `?token=${encodeURIComponent(token)}` : ''}`
+   419→      window.open(url, '_blank', 'noopener,noreferrer')
+   420→    } catch (e: any) {
+   421→      toast.error('No se pudo generar el carnet PDF: ' + (e.message || ''))
+   422→    } finally {
+   423→      setTimeout(() => setPdfLoadingId(null), 800)
+   424→    }
+   425→  }
+   426→
+   427→  const sectionName = useMemo(() => {
+   428→    const map = new Map(sections.map((s) => [s.id, s]))
+   429→    return (id: string) => {
+   430→      const s = map.get(id)
+   431→      return s ? `${s.nombre} · ${turnoLabel[s.turno] || s.turno}` : '—'
+   432→    }
+   433→  }, [sections])
+   434→
+   435→  const initialsOf = (s: StudentRow) =>
+   436→    `${s.nombre?.[0] || ''}${s.apellido?.[0] || ''}`.toUpperCase()
+   437→
+   438→  return (
+   439→    <div className="space-y-6">
+   440→      <div className="flex items-start justify-between gap-4 flex-wrap">
+   441→        <div>
+   442→          <h2 className="text-2xl font-bold tracking-tight">Estudiantes</h2>
+   443→          <p className="text-sm text-muted-foreground">
+   444→            Gestiona el registro de estudiantes del plantel
+   445→          </p>
+   446→        </div>
+   447→        <Button onClick={openCreate} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+   448→          <Plus className="w-4 h-4" />
+   449→          Agregar estudiante
+   450→        </Button>
+   451→      </div>
+   452→
+   453→      <Card>
+   454→        <CardHeader>
+   455→          <div className="flex items-center gap-3 flex-wrap">
+   456→            <div className="relative flex-1 min-w-[200px]">
+   457→              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+   458→              <Input
+   459→                placeholder="Buscar por nombre o código..."
+   460→                value={search}
+   461→                onChange={(e) => setSearch(e.target.value)}
+   462→                className="pl-9"
+   463→              />
+   464→            </div>
+   465→            <Select value={sectionFilter} onValueChange={setSectionFilter}>
+   466→              <SelectTrigger className="w-[200px]">
+   467→                <SelectValue placeholder="Todas las secciones" />
+   468→              </SelectTrigger>
+   469→              <SelectContent>
+   470→                <SelectItem value="all">Todas las secciones</SelectItem>
+   471→                {sections.map((s) => (
+   472→                  <SelectItem key={s.id} value={s.id}>
+   473→                    {s.nombre} · {turnoLabel[s.turno] || s.turno}
+   474→                  </SelectItem>
+   475→                ))}
+   476→              </SelectContent>
+   477→            </Select>
+   478→          </div>
+   479→        </CardHeader>
+   480→        <CardContent>
+   481→          {loading ? (
+   482→            <div className="space-y-2">
+   483→              {Array.from({ length: 5 }).map((_, i) => (
+   484→                <Skeleton key={i} className="h-10 w-full" />
+   485→              ))}
+   486→            </div>
+   487→          ) : students.length === 0 ? (
+   488→            <div className="py-12 text-center">
+   489→              <GraduationCap className="w-10 h-10 mx-auto text-muted-foreground/50" />
+   490→              <p className="mt-3 text-sm text-muted-foreground">
+   491→                No hay estudiantes registrados
+   492→              </p>
+   493→              <p className="text-xs text-muted-foreground">
+   494→                Comienza agregando un estudiante o ajusta los filtros
+   495→              </p>
+   496→            </div>
+   497→          ) : (
+   498→            <div className="max-h-[60vh] overflow-y-auto -mx-2">
+   499→              <Table>
+   500→                <TableHeader>
+   501→                  <TableRow>
+   502→                    <TableHead>Estudiante</TableHead>
+   503→                    <TableHead className="hidden md:table-cell">Cédula escolar</TableHead>
+   504→                    <TableHead>Sección</TableHead>
+   505→                    <TableHead className="hidden sm:table-cell">Género</TableHead>
+   506→                    <TableHead className="text-center">Activo</TableHead>
+   507→                    <TableHead className="text-right">Acciones</TableHead>
+   508→                  </TableRow>
+   509→                </TableHeader>
+   510→                <TableBody>
+   511→                  {students.map((s) => (
+   512→                    <TableRow key={s.id} className={!s.activo ? 'opacity-60' : ''}>
+   513→                      <TableCell>
+   514→                        <div className="flex items-center gap-3">
+   515→                          <Avatar className="w-9 h-9 border border-emerald-100 dark:border-emerald-950 shrink-0">
+   516→                            {s.fotoKey ? (
+   517→                              <AvatarImage
+   518→                                src={`/api/files/${s.fotoKey}`}
+   519→                                alt={`${s.nombre} ${s.apellido}`}
+   520→                              />
+   521→                            ) : null}
+   522→                            <AvatarFallback className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 text-xs font-semibold">
+   523→                              {initialsOf(s)}
+   524→                            </AvatarFallback>
+   525→                          </Avatar>
+   526→                          <div className="min-w-0">
+   527→                            <p className="font-medium truncate">
+   528→                              {s.apellido}, {s.nombre}
+   529→                            </p>
+   530→                            <p className="text-xs text-muted-foreground font-mono">
+   531→                              {s.codigoUnico}
+   532→                            </p>
+   533→                          </div>
+   534→                        </div>
+   535→                      </TableCell>
+   536→                      <TableCell className="hidden md:table-cell">
+   537→                        <span className="text-sm">{s.cedulaEscolar || '—'}</span>
+   538→                      </TableCell>
+   539→                      <TableCell>
+   540→                        {s.section ? (
+   541→                          <Badge variant="outline" className="font-normal">
+   542→                            {sectionName(s.section.id)}
+   543→                          </Badge>
+   544→                        ) : (
+   545→                          '—'
+   546→                        )}
+   547→                      </TableCell>
+   548→                      <TableCell className="hidden sm:table-cell">
+   549→                        {s.genero ? generoLabel[s.genero] || s.genero : '—'}
+   550→                      </TableCell>
+   551→                      <TableCell className="text-center">
+   552→                        <Switch
+   553→                          checked={s.activo}
+   554→                          onCheckedChange={() => handleToggleActivo(s)}
+   555→                          disabled={togglingId === s.id}
+   556→                        />
+   557→                      </TableCell>
+   558→                      <TableCell className="text-right">
+   559→                        <div className="flex justify-end gap-1">
+   560→                          <Button
+   561→                            size="icon"
+   562→                            variant="ghost"
+   563→                            onClick={() => openEdit(s)}
+   564→                            aria-label="Editar"
+   565→                            title="Editar"
+   566→                          >
+   567→                            <Pencil className="w-4 h-4" />
+   568→                          </Button>
+   569→                          <Button
+   570→                            size="icon"
+   571→                            variant="ghost"
+   572→                            onClick={() => openCarnetPdf(s)}
+   573→                            disabled={pdfLoadingId === s.id}
+   574→                            aria-label="Generar Carnet PDF"
+   575→                            title="Generar Carnet PDF"
+   576→                            className="text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+   577→                          >
+   578→                            {pdfLoadingId === s.id ? (
+   579→                              <Loader2 className="w-4 h-4 animate-spin" />
+   580→                            ) : (
+   581→                              <FileText className="w-4 h-4" />
+   582→                            )}
+   583→                          </Button>
+   584→                          <Button
+   585→                            size="icon"
+   586→                            variant="ghost"
+   587→                            onClick={() => {
+   588→                              setAttendancePdfTarget(s)
+   589→                            }}
+   590→                            disabled={pdfLoadingId === s.id}
+   591→                            aria-label="Reporte Asistencia PDF"
+   592→                            title="Reporte Asistencia PDF"
+   593→                            className="text-teal-700 hover:text-teal-800 hover:bg-teal-50 dark:text-teal-400 dark:hover:bg-teal-950/40"
+   594→                          >
+   595→                            <Download className="w-4 h-4" />
+   596→                          </Button>
+   597→                          <Button
+   598→                            size="icon"
+   599→                            variant="ghost"
+   600→                            className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40"
+   601→                            onClick={() => openDeleteStep1(s)}
+   602→                            aria-label="Eliminar"
+   603→                            title="Eliminar"
+   604→                          >
+   605→                            <Trash2 className="w-4 h-4" />
+   606→                          </Button>
+   607→                        </div>
+   608→                      </TableCell>
+   609→                    </TableRow>
+   610→                  ))}
+   611→                </TableBody>
+   612→              </Table>
+   613→            </div>
+   614→          )}
+   615→          {!loading && students.length > 0 && (
+   616→            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+   617→              <Users className="w-3.5 h-3.5" />
+   618→              <span>{students.length} estudiante(s) mostrado(s)</span>
+   619→            </div>
+   620→          )}
+   621→        </CardContent>
+   622→      </Card>
+   623→
+   624→      {/* Create / Edit Dialog */}
+   625→      <Dialog
+   626→        open={dialogOpen}
+   627→        onOpenChange={(open) => {
+   628→          setDialogOpen(open)
+   629→          if (!open) resetPhotoState()
+   630→        }}
+   631→      >
+   632→        <DialogContent className="sm:max-w-lg">
+   633→          <DialogHeader>
+   634→            <DialogTitle>{editing ? 'Editar estudiante' : 'Nuevo estudiante'}</DialogTitle>
+   635→            <DialogDescription>
+   636→              {editing
+   637→                ? 'Actualiza los datos del estudiante seleccionado.'
+   638→                : 'Completa el formulario para registrar un nuevo estudiante.'}
+   639→            </DialogDescription>
+   640→          </DialogHeader>
+   641→          <form onSubmit={handleSubmitClick} className="space-y-4">
+   642→            {/* Photo upload (only when editing) */}
+   643→            {editing && (
+   644→              <div className="flex items-center gap-4 pb-3 border-b">
+   645→                <Avatar className="w-20 h-20 border-2 border-emerald-100 dark:border-emerald-950">
+   646→                  {photoPreview ? (
+   647→                    <AvatarImage src={photoPreview} alt="Foto del estudiante" />
+   648→                  ) : null}
+   649→                  <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white text-xl font-bold">
+   650→                    {`${form.nombre?.[0] || ''}${form.apellido?.[0] || ''}`.toUpperCase()}
+   651→                  </AvatarFallback>
+   652→                </Avatar>
+   653→                <div className="flex-1 min-w-0">
+   654→                  <Label className="text-xs text-muted-foreground">Foto del estudiante</Label>
+   655→                  <p className="text-xs text-muted-foreground mb-2">
+   656→                    {photoFile ? 'Nueva foto seleccionada' : editing.fotoKey ? 'Foto actual' : 'Sin foto'}
+   657→                  </p>
+   658→                  <div className="flex gap-2">
+   659→                    <Button
+   660→                      type="button"
+   661→                      variant="outline"
+   662→                      size="sm"
+   663→                      onClick={() => photoInputRef.current?.click()}
+   664→                      disabled={uploadingPhoto}
+   665→                      className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+   666→                    >
+   667→                      {uploadingPhoto ? (
+   668→                        <>
+   669→                          <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+   670→                          Subiendo…
+   671→                        </>
+   672→                      ) : (
+   673→                        <>
+   674→                          <Camera className="w-3.5 h-3.5 mr-1" />
+   675→                          {editing.fotoKey ? 'Cambiar foto' : 'Subir foto'}
+   676→                        </>
+   677→                      )}
+   678→                    </Button>
+   679→                    {photoFile && (
+   680→                      <Button
+   681→                        type="button"
+   682→                        variant="ghost"
+   683→                        size="sm"
+   684→                        onClick={() => {
+   685→                          setPhotoFile(null)
+   686→                          setPhotoPreview(editing.fotoKey ? `/api/files/${editing.fotoKey}` : null)
+   687→                          if (photoInputRef.current) photoInputRef.current.value = ''
+   688→                        }}
+   689→                      >
+   690→                        Cancelar
+   691→                      </Button>
+   692→                    )}
+   693→                  </div>
+   694→                  <input
+   695→                    ref={photoInputRef}
+   696→                    type="file"
+   697→                    accept="image/*"
+   698→                    className="hidden"
+   699→                    onChange={handlePhotoSelect}
+   700→                  />
+   701→                </div>
+   702→              </div>
+   703→            )}
+   704→
+   705→            <div className="grid grid-cols-2 gap-3">
+   706→              <div className="space-y-2">
+   707→                <Label htmlFor="nombre">Nombre *</Label>
+   708→                <Input
+   709→                  id="nombre"
+   710→                  value={form.nombre}
+   711→                  onChange={(e) => setForm({ ...form, nombre: e.target.value })}
+   712→                  required
+   713→                />
+   714→              </div>
+   715→              <div className="space-y-2">
+   716→                <Label htmlFor="apellido">Apellido *</Label>
+   717→                <Input
+   718→                  id="apellido"
+   719→                  value={form.apellido}
+   720→                  onChange={(e) => setForm({ ...form, apellido: e.target.value })}
+   721→                  required
+   722→                />
+   723→              </div>
+   724→            </div>
+   725→            <div className="space-y-2">
+   726→              <Label htmlFor="cedulaEscolar">Cédula escolar</Label>
+   727→              <Input
+   728→                id="cedulaEscolar"
+   729→                value={form.cedulaEscolar}
+   730→                onChange={(e) => setForm({ ...form, cedulaEscolar: e.target.value })}
+   731→                placeholder="Opcional"
+   732→              />
+   733→            </div>
+   734→            <div className="space-y-2">
+   735→              <Label htmlFor="sectionId">Sección *</Label>
+   736→              <Select
+   737→                value={form.sectionId}
+   738→                onValueChange={(v) => setForm({ ...form, sectionId: v })}
+   739→              >
+   740→                <SelectTrigger id="sectionId" className="w-full">
+   741→                  <SelectValue placeholder="Selecciona una sección" />
+   742→                </SelectTrigger>
+   743→                <SelectContent>
+   744→                  {sections.length === 0 ? (
+   745→                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+   746→                      Crea una sección primero
+   747→                    </div>
+   748→                  ) : (
+   749→                    sections.map((s) => (
+   750→                      <SelectItem key={s.id} value={s.id}>
+   751→                        {s.nombre} · {turnoLabel[s.turno] || s.turno} (Grado {s.grado})
+   752→                      </SelectItem>
+   753→                    ))
+   754→                  )}
+   755→                </SelectContent>
+   756→              </Select>
+   757→            </div>
+   758→            <div className="grid grid-cols-2 gap-3">
+   759→              <div className="space-y-2">
+   760→                <Label htmlFor="genero">Género</Label>
+   761→                <Select
+   762→                  value={form.genero}
+   763→                  onValueChange={(v) => setForm({ ...form, genero: v })}
+   764→                >
+   765→                  <SelectTrigger id="genero" className="w-full">
+   766→                    <SelectValue placeholder="Sin especificar" />
+   767→                  </SelectTrigger>
+   768→                  <SelectContent>
+   769→                    <SelectItem value="M">Masculino</SelectItem>
+   770→                    <SelectItem value="F">Femenino</SelectItem>
+   771→                    <SelectItem value="O">Otro</SelectItem>
+   772→                  </SelectContent>
+   773→                </Select>
+   774→              </div>
+   775→              <div className="space-y-2">
+   776→                <Label htmlFor="fechaNacimiento">Fecha de nacimiento</Label>
+   777→                <Input
+   778→                  id="fechaNacimiento"
+   779→                  type="date"
+   780→                  value={form.fechaNacimiento}
+   781→                  onChange={(e) => setForm({ ...form, fechaNacimiento: e.target.value })}
+   782→                />
+   783→              </div>
+   784→            </div>
+   785→            <DialogFooter>
+   786→              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+   787→                Cancelar
+   788→              </Button>
+   789→              <Button
+   790→                type="submit"
+   791→                disabled={submitting}
+   792→                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   793→              >
+   794→                {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+   795→                {editing ? 'Guardar cambios' : 'Crear estudiante'}
+   796→              </Button>
+   797→            </DialogFooter>
+   798→          </form>
+   799→        </DialogContent>
+   800→      </Dialog>
+   801→
+   802→      {/* Edit double-confirmation dialog */}
+   803→      <AlertDialog
+   804→        open={confirmEditOpen}
+   805→        onOpenChange={(open) => {
+   806→          if (!submitting) setConfirmEditOpen(open)
+   807→        }}
+   808→      >
+   809→        <AlertDialogContent>
+   810→          <AlertDialogHeader>
+   811→            <AlertDialogTitle className="flex items-center gap-2">
+   812→              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+   813→              ¿Confirmas que los datos son correctos?
+   814→            </AlertDialogTitle>
+   815→            <AlertDialogDescription>
+   816→              Vas a {editing ? 'actualizar' : 'crear'} el estudiante{' '}
+   817→              <strong>
+   818→                {form.nombre} {form.apellido}
+   819→              </strong>
+   820→              {form.cedulaEscolar ? (
+   821→                <>
+   822→                  {' '}— cédula escolar <strong>{form.cedulaEscolar}</strong>
+   823→                </>
+   824→              ) : null}
+   825→              . Revisa cuidadosamente antes de continuar.
+   826→            </AlertDialogDescription>
+   827→          </AlertDialogHeader>
+   828→          <AlertDialogFooter>
+   829→            <AlertDialogCancel disabled={submitting}>No, revisar</AlertDialogCancel>
+   830→            <AlertDialogAction
+   831→              onClick={(e) => {
+   832→                e.preventDefault()
+   833→                performSave()
+   834→              }}
+   835→              disabled={submitting}
+   836→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   837→            >
+   838→              {submitting ? (
+   839→                <>
+   840→                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+   841→                  Guardando…
+   842→                </>
+   843→              ) : (
+   844→                'Sí, guardar'
+   845→              )}
+   846→            </AlertDialogAction>
+   847→          </AlertDialogFooter>
+   848→        </AlertDialogContent>
+   849→      </AlertDialog>
+   850→
+   851→      {/* Delete step 1 confirmation */}
+   852→      <AlertDialog
+   853→        open={!!deleteTarget && !deleteStep2}
+   854→        onOpenChange={(open) => {
+   855→          if (!open && !deleting) cancelDelete()
+   856→        }}
+   857→      >
+   858→        <AlertDialogContent>
+   859→          <AlertDialogHeader>
+   860→            <AlertDialogTitle className="flex items-center gap-2">
+   861→              <AlertTriangle className="w-5 h-5 text-amber-500" />
+   862→              ¿Eliminar a {deleteTarget?.nombre} {deleteTarget?.apellido}?
+   863→            </AlertDialogTitle>
+   864→            <AlertDialogDescription>
+   865→              El estudiante será desactivado en el sistema. Esta acción se puede revertir
+   866→              reactivándolo desde la lista. ¿Deseas continuar?
+   867→            </AlertDialogDescription>
+   868→          </AlertDialogHeader>
+   869→          <AlertDialogFooter>
+   870→            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+   871→            <AlertDialogAction
+   872→              onClick={(e) => {
+   873→                e.preventDefault()
+   874→                advanceToDeleteStep2()
+   875→              }}
+   876→              className="bg-red-600 hover:bg-red-700 text-white"
+   877→            >
+   878→              Continuar
+   879→            </AlertDialogAction>
+   880→          </AlertDialogFooter>
+   881→        </AlertDialogContent>
+   882→      </AlertDialog>
+   883→
+   884→      {/* Delete step 2 — type the name to confirm */}
+   885→      <AlertDialog
+   886→        open={!!deleteTarget && deleteStep2}
+   887→        onOpenChange={(open) => {
+   888→          if (!open && !deleting) cancelDelete()
+   889→        }}
+   890→      >
+   891→        <AlertDialogContent>
+   892→          <AlertDialogHeader>
+   893→            <AlertDialogTitle className="flex items-center gap-2">
+   894→              <AlertTriangle className="w-5 h-5 text-red-600" />
+   895→              Esta acción no se puede deshacer
+   896→            </AlertDialogTitle>
+   897→            <AlertDialogDescription>
+   898→              Para confirmar, escribe el nombre completo del estudiante tal como aparece:
+   899→              <br />
+   900→              <code className="block mt-2 px-2 py-1 rounded bg-muted text-foreground font-mono text-xs">
+   901→                {deleteTarget?.nombre} {deleteTarget?.apellido}
+   902→              </code>
+   903→            </AlertDialogDescription>
+   904→          </AlertDialogHeader>
+   905→          <div className="py-2">
+   906→            <Input
+   907→              autoFocus
+   908→              placeholder="Escribe el nombre completo aquí"
+   909→              value={deleteConfirmName}
+   910→              onChange={(e) => setDeleteConfirmName(e.target.value)}
+   911→              disabled={deleting}
+   912→              onKeyDown={(e) => {
+   913→                if (e.key === 'Enter') {
+   914→                  e.preventDefault()
+   915→                  if (
+   916→                    deleteConfirmName.trim().toLowerCase() ===
+   917→                    `${deleteTarget?.nombre} ${deleteTarget?.apellido}`.trim().toLowerCase()
+   918→                  ) {
+   919→                    performDelete()
+   920→                  }
+   921→                }
+   922→              }}
+   923→            />
+   924→            <p className="text-xs text-muted-foreground mt-2">
+   925→              {deleteConfirmName.trim().toLowerCase() ===
+   926→              `${deleteTarget?.nombre} ${deleteTarget?.apellido}`.trim().toLowerCase()
+   927→                ? '✓ El nombre coincide. Puedes eliminar.'
+   928→                : 'El nombre debe coincidir exactamente para habilitar la eliminación.'}
+   929→            </p>
+   930→          </div>
+   931→          <AlertDialogFooter>
+   932→            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+   933→            <AlertDialogAction
+   934→              onClick={(e) => {
+   935→                e.preventDefault()
+   936→                performDelete()
+   937→              }}
+   938→              disabled={
+   939→                deleting ||
+   940→                deleteConfirmName.trim().toLowerCase() !==
+   941→                  `${deleteTarget?.nombre} ${deleteTarget?.apellido}`.trim().toLowerCase()
+   942→              }
+   943→              className="bg-red-600 hover:bg-red-700 text-white"
+   944→            >
+   945→              {deleting ? (
+   946→                <>
+   947→                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+   948→                  Eliminando…
+   949→                </>
+   950→              ) : (
+   951→                'Eliminar definitivamente'
+   952→              )}
+   953→            </AlertDialogAction>
+   954→          </AlertDialogFooter>
+   955→        </AlertDialogContent>
+   956→      </AlertDialog>
+   957→
+   958→      {/* Monthly attendance PDF dialog */}
+   959→      <Dialog
+   960→        open={!!attendancePdfTarget}
+   961→        onOpenChange={(open) => {
+   962→          if (!open) setAttendancePdfTarget(null)
+   963→        }}
+   964→      >
+   965→        <DialogContent className="sm:max-w-md">
+   966→          <DialogHeader>
+   967→            <DialogTitle className="flex items-center gap-2">
+   968→              <Download className="w-5 h-5 text-teal-600" />
+   969→              Reporte de Asistencia Mensual
+   970→            </DialogTitle>
+   971→            <DialogDescription>
+   972→              Estudiante:{' '}
+   973→              <strong>
+   974→                {attendancePdfTarget?.nombre} {attendancePdfTarget?.apellido}
+   975→              </strong>
+   976→              . Selecciona el mes del reporte que deseas generar.
+   977→            </DialogDescription>
+   978→          </DialogHeader>
+   979→          <div className="space-y-3 py-2">
+   980→            <div className="space-y-2">
+   981→              <Label htmlFor="attendance-month">Mes del reporte</Label>
+   982→              <Input
+   983→                id="attendance-month"
+   984→                type="month"
+   985→                value={attendanceMonth}
+   986→                onChange={(e) => setAttendanceMonth(e.target.value)}
+   987→                className="w-full"
+   988→              />
+   989→              <p className="text-xs text-muted-foreground">
+   990→                El PDF se abrirá en una nueva pestaña. Incluye estadísticas,
+   991→                detalle diario y líneas de firma.
+   992→              </p>
+   993→            </div>
+   994→          </div>
+   995→          <DialogFooter>
+   996→            <Button
+   997→              type="button"
+   998→              variant="outline"
+   999→              onClick={() => setAttendancePdfTarget(null)}
+  1000→              disabled={!!pdfLoadingId}
+  1001→            >
+  1002→              Cancelar
+  1003→            </Button>
+  1004→            <Button
+  1005→              type="button"
+  1006→              onClick={() => attendancePdfTarget && openAttendancePdf(attendancePdfTarget)}
+  1007→              disabled={!attendancePdfTarget || !attendanceMonth || !!pdfLoadingId}
+  1008→              className="bg-teal-600 hover:bg-teal-700 text-white"
+  1009→            >
+  1010→              {pdfLoadingId === attendancePdfTarget?.id ? (
+  1011→                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+  1012→              ) : (
+  1013→                <Download className="w-4 h-4 mr-2" />
+  1014→              )}
+  1015→              Generar PDF
+  1016→            </Button>
+  1017→          </DialogFooter>
+  1018→        </DialogContent>
+  1019→      </Dialog>
+  1020→    </div>
+  1021→  )
+  1022→}
+  1023→
