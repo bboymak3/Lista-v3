@@ -5,6 +5,7 @@ import { useAuthStore, type Role } from '@/stores/auth-store'
 import { useViewStore } from '@/stores/view-store'
 import { usePushNotifications } from '@/hooks/use-push-notifications'
 import { UpdatePrompt } from '@/components/shared/update-prompt'
+import { GlobalSearch } from '@/components/shared/global-search'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -359,6 +360,7 @@ export function AppShell() {
         <header className="hidden md:flex items-center justify-between px-6 h-14 border-b bg-card">
           <h2 className="font-semibold text-lg">{activeItem?.label}</h2>
           <div className="flex items-center gap-2">
+            <GlobalSearch />
             <ThemeToggle />
             <Button variant="ghost" size="icon" className="relative">
               <Bell className="w-5 h-5" />

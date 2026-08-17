@@ -88,8 +88,9 @@ model Plantel {
   updatedAt     DateTime @updatedAt
 
   // Relations
-  sections    Section[]
-  users       User[]     @relation("UserPlantel")
+  sections       Section[]
+  users          User[]     @relation("UserPlantel")
+  calendarEvents CalendarEvent[]
 
   @@index([nombre])
   @@map("v3_plantels")
@@ -332,4 +333,24 @@ model Justification {
 
   @@index([estudianteId, fecha])
   @@map("v3_justifications")
+}
+
+// ============================================
+// CALENDARIO ESCOLAR (feriados, vacaciones, reuniones)
+// ============================================
+
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  plantelId   String
+  plantel     Plantel  @relation(fields: [plantelId], references: [id], onDelete: Cascade)
+  tipo        String   // feriado | vacaciones | reunion | examen | otro
+  titulo      String
+  descripcion String?
+  fecha       String   // YYYY-MM-DD (fecha única) — si es rango, fecha = inicio
+  fechaFin    String?  // YYYY-MM-DD (opcional, para vacaciones)
+  afectaAsistencia Boolean @default(true) // si true, no se cuenta como inasistencia
+  createdAt   DateTime @default(now())
+
+  @@index([plantelId, fecha])
+  @@map("v3_calendar_events")
 }
