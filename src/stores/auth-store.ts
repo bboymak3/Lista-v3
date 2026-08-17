@@ -3,7 +3,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-export type Role = 'admin' | 'profesor' | 'representante' | 'alumno'
+export type Role = 'super_admin' | 'admin' | 'profesor' | 'representante' | 'alumno'
 
 export interface AuthUser {
   id: string

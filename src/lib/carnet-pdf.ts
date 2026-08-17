@@ -41,6 +41,7 @@ export interface CarnetStudentData {
     nombre: string
     direccion: string | null
     periodoActual: string
+    logoKey: string | null
   } | null
 }
 
@@ -92,10 +93,11 @@ export async function fetchStudentDataForCarnet(
       plantelNombre: string | null
       plantelDireccion: string | null
       plantelPeriodo: string | null
+      plantelLogoKey: string | null
     }>(
       `SELECT s.id, s.codigoUnico, s.cedulaEscolar, s.nombre, s.apellido, s.fechaNacimiento, s.genero, s.qrCode, s.fotoKey,
               sec.id AS sectionId, sec.nombre AS sectionNombre, sec.grado AS sectionGrado, sec.turno AS sectionTurno, sec.periodoEscolar AS sectionPeriodo,
-              p.id AS plantelId, p.nombre AS plantelNombre, p.direccion AS plantelDireccion, p.periodoActual AS plantelPeriodo
+              p.id AS plantelId, p.nombre AS plantelNombre, p.direccion AS plantelDireccion, p.periodoActual AS plantelPeriodo, p.logoKey AS plantelLogoKey
        FROM v3_students s
        LEFT JOIN v3_sections sec ON sec.id = s.sectionId
        LEFT JOIN v3_plantels p ON p.id = sec.plantelId
@@ -128,6 +130,7 @@ export async function fetchStudentDataForCarnet(
             nombre: row.plantelNombre || '',
             direccion: row.plantelDireccion,
             periodoActual: row.plantelPeriodo || '2024-2025',
+            logoKey: row.plantelLogoKey,
           }
         : null,
     }
@@ -150,6 +153,7 @@ export async function fetchStudentDataForCarnet(
               nombre: true,
               direccion: true,
               periodoActual: true,
+              logoKey: true,
             },
           },
         },
@@ -182,6 +186,7 @@ export async function fetchStudentDataForCarnet(
           nombre: student.section.plantel.nombre,
           direccion: student.section.plantel.direccion,
           periodoActual: student.section.plantel.periodoActual,
+          logoKey: student.section.plantel.logoKey,
         }
       : null,
   }
@@ -216,6 +221,42 @@ export async function fetchPhotoBuffer(
   // Dev: filesystem
   try {
     const filePath = path.join(process.cwd(), 'public', 'uploads', fotoKey)
+    const buffer = await fs.readFile(filePath)
+    return { bytes: new Uint8Array(buffer), format }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Obtiene el buffer del logo del plantel desde R2 (prod) o filesystem (dev).
+ * Acepta PNG/JPEG. Devuelve null si no existe/no hay logoKey.
+ */
+export async function fetchLogoBuffer(
+  logoKey: string | null
+): Promise<{ bytes: Uint8Array; format: 'png' | 'jpg' } | null> {
+  if (!logoKey) return null
+  const ext = logoKey.split('.').pop()?.toLowerCase() || ''
+  if (ext !== 'png' && ext !== 'jpg' && ext !== 'jpeg') return null
+  const format: 'png' | 'jpg' = ext === 'png' ? 'png' : 'jpg'
+
+  if (isD1()) {
+    const ctx = getCloudflareContext()
+    const bucket = ctx?.env?.BUCKET as R2Bucket | undefined
+    if (!bucket || typeof bucket.get !== 'function') return null
+    try {
+      const obj = await bucket.get(logoKey)
+      if (!obj) return null
+      const arrayBuffer = await obj.arrayBuffer()
+      return { bytes: new Uint8Array(arrayBuffer), format }
+    } catch {
+      return null
+    }
+  }
+
+  // Dev: filesystem
+  try {
+    const filePath = path.join(process.cwd(), 'public', 'uploads', logoKey)
     const buffer = await fs.readFile(filePath)
     return { bytes: new Uint8Array(buffer), format }
   } catch {
@@ -296,9 +337,47 @@ export async function buildCarnetPdf(
   const plantelNombre = data.plantel?.nombre || 'Plantel'
   const periodo = data.plantel?.periodoActual || data.section?.periodoEscolar || '2024-2025'
 
+  // === Logo del plantel (top-left del header) ===
+  // Si existe, se embebe dentro del header emerald. El texto "CARNET ESTUDIANTIL"
+  // se desplaza a la derecha del logo.
+  const logoBuffer = data.plantel?.logoKey
+    ? await fetchLogoBuffer(data.plantel.logoKey)
+    : null
+  const logoSize = 70 // pt (tamaño fijo)
+  const logoX = 14
+  const logoY = PAGE_H - logoSize - 20 // 20pt de padding superior
+  let headerTextX = 16 // posición X por defecto del texto del header (sin logo)
+
+  if (logoBuffer) {
+    try {
+      const embedded =
+        logoBuffer.format === 'png'
+          ? await pdfDoc.embedPng(logoBuffer.bytes)
+          : await pdfDoc.embedJpg(logoBuffer.bytes)
+      // Fondo blanco detrás del logo (mejor contraste sobre emerald)
+      page.drawRectangle({
+        x: logoX - 3,
+        y: logoY - 3,
+        width: logoSize + 6,
+        height: logoSize + 6,
+        color: COLOR_WHITE,
+      })
+      page.drawImage(embedded, {
+        x: logoX,
+        y: logoY,
+        width: logoSize,
+        height: logoSize,
+      })
+      // Desplazar el texto del header a la derecha del logo
+      headerTextX = logoX + logoSize + 10
+    } catch {
+      // Si falla la incrustación, no usar logo y dejar texto en posición original
+    }
+  }
+
   // Título superior
   page.drawText('CARNET ESTUDIANTIL', {
-    x: 16,
+    x: headerTextX,
     y: PAGE_H - 24,
     size: 9,
     font: fontBold,
@@ -306,7 +385,7 @@ export async function buildCarnetPdf(
   })
   // Sistema
   page.drawText('Sistema de Asistencia · Lista', {
-    x: 16,
+    x: headerTextX,
     y: PAGE_H - 36,
     size: 6.5,
     font: fontOblique,
@@ -314,6 +393,7 @@ export async function buildCarnetPdf(
   })
 
   // Plantel nombre (lado derecho del header)
+  // Si hay logo, el plantel va a la derecha del logo (entre el header text y el borde derecho)
   const plantelText = plantelNombre.length > 26 ? plantelNombre.slice(0, 25) + '…' : plantelNombre
   const plantelWidth = fontBold.widthOfTextAtSize(plantelText, 10)
   page.drawText(plantelText, {

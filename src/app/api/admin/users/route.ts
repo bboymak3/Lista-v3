@@ -3,26 +3,48 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isD1, d1First, d1Query, d1Run } from '@/lib/d1'
 import { db } from '@/lib/db'
 import { getUserFromRequest } from '@/lib/auth'
+import { getUserPlantelId } from '@/lib/auth-helpers'
 import { hashPassword } from '@/lib/db-auth'
 import { v4 as uuidv4 } from 'uuid'
 
 // GET /api/admin/users — list users, filter by rol
+// - admin: only users in their plantelId
+// - super_admin: all users (optionally ?plantelId=)
 export async function GET(request: NextRequest) {
   const user = getUserFromRequest(request)
-  if (!user || user.rol !== 'admin') {
+  if (!user || (user.rol !== 'admin' && user.rol !== 'super_admin')) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
+
+  const isSuperAdmin = user.rol === 'super_admin'
 
   const { searchParams } = new URL(request.url)
   const rol = searchParams.get('rol') || undefined
   const includeInactive = searchParams.get('includeInactive') === 'true'
   const search = searchParams.get('search') || undefined
 
+  // Determine the plantelId filter
+  let plantelIdFilter: string | null = null
+  if (isSuperAdmin) {
+    plantelIdFilter = searchParams.get('plantelId') || null
+  } else {
+    plantelIdFilter = await getUserPlantelId(request)
+    if (!plantelIdFilter) {
+      return NextResponse.json({ data: [] })
+    }
+  }
+
   if (isD1()) {
     // Producción: D1
     const where: string[] = []
     const params: unknown[] = []
+    // admin no puede ver super_admin
+    if (!isSuperAdmin) where.push('rol != \'super_admin\'')
     if (!includeInactive) where.push('activo = 1')
+    if (plantelIdFilter) {
+      where.push('plantelId = ?')
+      params.push(plantelIdFilter)
+    }
     if (rol) {
       where.push('rol = ?')
       params.push(rol)
@@ -44,10 +66,11 @@ export async function GET(request: NextRequest) {
       telefono: string | null
       whatsapp: string | null
       fotoKey: string | null
+      plantelId: string | null
       activo: number
       createdAt: string
     }>(
-      `SELECT id, cedula, nombre, apellido, email, rol, telefono, whatsapp, fotoKey, activo, createdAt
+      `SELECT id, cedula, nombre, apellido, email, rol, telefono, whatsapp, fotoKey, plantelId, activo, createdAt
        FROM v3_users
        ${whereSql}
        ORDER BY rol ASC, apellido ASC`,
@@ -64,6 +87,7 @@ export async function GET(request: NextRequest) {
       telefono: u.telefono,
       whatsapp: u.whatsapp,
       fotoKey: u.fotoKey,
+      plantelId: u.plantelId,
       activo: u.activo === 1,
       createdAt: u.createdAt,
     }))
@@ -73,7 +97,9 @@ export async function GET(request: NextRequest) {
 
   // Desarrollo: Prisma
   const where: any = {}
+  if (!isSuperAdmin) where.rol = { not: 'super_admin' }
   if (!includeInactive) where.activo = true
+  if (plantelIdFilter) where.plantelId = plantelIdFilter
   if (rol) where.rol = rol
   if (search) {
     where.OR = [
@@ -96,6 +122,7 @@ export async function GET(request: NextRequest) {
       telefono: true,
       whatsapp: true,
       fotoKey: true,
+      plantelId: true,
       activo: true,
       createdAt: true,
     },
@@ -106,15 +133,19 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/admin/users — create user
+// - admin: created user gets plantelId = admin's plantelId
+// - super_admin: created user gets plantelId = body.plantelId (optional, can be null)
 export async function POST(request: NextRequest) {
   const user = getUserFromRequest(request)
-  if (!user || user.rol !== 'admin') {
+  if (!user || (user.rol !== 'admin' && user.rol !== 'super_admin')) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
 
+  const isSuperAdmin = user.rol === 'super_admin'
+
   try {
     const body = await request.json()
-    const { cedula, nombre, apellido, email, password, rol, telefono, whatsapp } = body
+    const { cedula, nombre, apellido, email, password, rol, telefono, whatsapp, plantelId } = body
 
     if (!cedula || !nombre || !apellido || !password || !rol) {
       return NextResponse.json(
@@ -123,9 +154,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const validRoles = ['admin', 'profesor', 'representante', 'alumno']
+    // Roles válidos: admin no puede crear super_admin
+    const validRoles = isSuperAdmin
+      ? ['admin', 'profesor', 'representante', 'alumno', 'super_admin']
+      : ['admin', 'profesor', 'representante', 'alumno']
     if (!validRoles.includes(rol)) {
       return NextResponse.json({ error: 'Rol inválido' }, { status: 400 })
+    }
+
+    // Determinar el plantelId del nuevo usuario
+    let newUserPlantelId: string | null
+    if (isSuperAdmin) {
+      // super_admin puede asignar cualquier plantelId (o null si es super_admin)
+      newUserPlantelId = rol === 'super_admin' ? null : (plantelId || null)
+    } else {
+      // admin crea usuarios en su propio plantel
+      const userPlantelId = await getUserPlantelId(request)
+      if (!userPlantelId) {
+        return NextResponse.json({ error: 'No tienes plantel asignado' }, { status: 403 })
+      }
+      newUserPlantelId = userPlantelId
     }
 
     if (isD1()) {
@@ -152,9 +200,9 @@ export async function POST(request: NextRequest) {
       const newId = uuidv4()
       const now = new Date().toISOString()
       await d1Run(
-        `INSERT INTO v3_users (id, cedula, nombre, apellido, email, password, rol, telefono, whatsapp, fotoKey, activo, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?, ?)`,
-        [newId, cedula, nombre, apellido, email || null, hashedPassword, rol, telefono || null, whatsapp || null, now, now]
+        `INSERT INTO v3_users (id, cedula, nombre, apellido, email, password, rol, telefono, whatsapp, fotoKey, plantelId, activo, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?)`,
+        [newId, cedula, nombre, apellido, email || null, hashedPassword, rol, telefono || null, whatsapp || null, newUserPlantelId, now, now]
       )
 
       const created = await d1First<{
@@ -166,10 +214,11 @@ export async function POST(request: NextRequest) {
         rol: string
         telefono: string | null
         whatsapp: string | null
+        plantelId: string | null
         activo: number
         createdAt: string
       }>(
-        'SELECT id, cedula, nombre, apellido, email, rol, telefono, whatsapp, activo, createdAt FROM v3_users WHERE id = ? LIMIT 1',
+        'SELECT id, cedula, nombre, apellido, email, rol, telefono, whatsapp, plantelId, activo, createdAt FROM v3_users WHERE id = ? LIMIT 1',
         [newId]
       )
 
@@ -183,6 +232,7 @@ export async function POST(request: NextRequest) {
           rol: created?.rol,
           telefono: created?.telefono,
           whatsapp: created?.whatsapp,
+          plantelId: created?.plantelId,
           activo: created?.activo === 1,
           createdAt: created?.createdAt,
         },
@@ -191,13 +241,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Desarrollo: Prisma
-    // Verificar unicidad de cédula
     const existingCedula = await db.user.findUnique({ where: { cedula } })
     if (existingCedula) {
       return NextResponse.json({ error: 'La cédula ya está registrada' }, { status: 409 })
     }
 
-    // Verificar unicidad de email si viene
     if (email) {
       const existingEmail = await db.user.findUnique({ where: { email } })
       if (existingEmail) {
@@ -217,6 +265,7 @@ export async function POST(request: NextRequest) {
         rol,
         telefono: telefono || null,
         whatsapp: whatsapp || null,
+        plantelId: newUserPlantelId,
       },
       select: {
         id: true,
@@ -227,6 +276,7 @@ export async function POST(request: NextRequest) {
         rol: true,
         telefono: true,
         whatsapp: true,
+        plantelId: true,
         activo: true,
         createdAt: true,
       },

@@ -16,12 +16,15 @@ function getCloudflareContext(): any | null {
   return null
 }
 
-// Verifica que el estudiante pertenezca al usuario (si es alumno) o que el usuario sea admin
+// Verifica que el estudiante pertenezca al usuario:
+// - admin/super_admin: acceso total
+// - alumno: estudiante.user.id === payload.id
+// - representante: estudiante asignado al representante vía ParentStudent
 async function verifyStudentOwnership(
   payload: { id: string; rol: string },
   estudianteId: string
 ): Promise<boolean> {
-  if (payload.rol === 'admin') return true
+  if (payload.rol === 'admin' || payload.rol === 'super_admin') return true
   if (payload.rol === 'alumno') {
     if (isD1()) {
       const row = await d1First<{ id: string }>(
@@ -36,6 +39,20 @@ async function verifyStudentOwnership(
     })
     return !!student
   }
+  if (payload.rol === 'representante') {
+    if (isD1()) {
+      const row = await d1First<{ id: string }>(
+        'SELECT id FROM v3_parent_student WHERE representanteId = ? AND estudianteId = ? LIMIT 1',
+        [payload.id, estudianteId]
+      )
+      return !!row
+    }
+    const link = await db.parentStudent.findFirst({
+      where: { representanteId: payload.id, estudianteId },
+      select: { id: true },
+    })
+    return !!link
+  }
   return false
 }
 
@@ -46,8 +63,13 @@ export async function POST(request: NextRequest) {
   if (!payload) {
     return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
   }
-  // Solo alumnos (para su propio carnet) o admin pueden subir foto
-  if (payload.rol !== 'alumno' && payload.rol !== 'admin') {
+  // Alumnos (para su propio carnet), admin/super_admin y representante (de sus hijos) pueden subir foto
+  if (
+    payload.rol !== 'alumno' &&
+    payload.rol !== 'admin' &&
+    payload.rol !== 'super_admin' &&
+    payload.rol !== 'representante'
+  ) {
     return NextResponse.json({ error: 'Acceso denegado' }, { status: 403 })
   }
 

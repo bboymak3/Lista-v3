@@ -3,27 +3,43 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isD1, d1Query, d1First, d1Run } from '@/lib/d1'
 import { db } from '@/lib/db'
 import { getUserFromRequest } from '@/lib/auth'
+import { getUserPlantelId } from '@/lib/auth-helpers'
 import { v4 as uuidv4 } from 'uuid'
 
 // GET /api/admin/sections — list sections with plantel, tutor, studentCount
+// - admin: only sections in their plantelId
+// - super_admin: all sections (or ?plantelId=)
 export async function GET(request: NextRequest) {
   const user = getUserFromRequest(request)
-  if (!user || user.rol !== 'admin') {
+  if (!user || (user.rol !== 'admin' && user.rol !== 'super_admin')) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
 
+  const isSuperAdmin = user.rol === 'super_admin'
+
   const { searchParams } = new URL(request.url)
-  const plantelId = searchParams.get('plantelId') || undefined
+  const queryPlantelId = searchParams.get('plantelId') || undefined
   const includeInactive = searchParams.get('includeInactive') === 'true'
+
+  // Determine plantelId filter
+  let plantelIdFilter: string | null | undefined
+  if (isSuperAdmin) {
+    plantelIdFilter = queryPlantelId || null // null = all
+  } else {
+    plantelIdFilter = await getUserPlantelId(request)
+    if (!plantelIdFilter) {
+      return NextResponse.json({ data: [] })
+    }
+  }
 
   if (isD1()) {
     // Producción: SQL crudo con subqueries para _count y JOINs para plantel/tutor
     const where: string[] = []
     const params: unknown[] = []
     if (!includeInactive) where.push('s.activa = 1')
-    if (plantelId) {
+    if (plantelIdFilter) {
       where.push('s.plantelId = ?')
-      params.push(plantelId)
+      params.push(plantelIdFilter)
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
@@ -81,7 +97,7 @@ export async function GET(request: NextRequest) {
   // Desarrollo: Prisma
   const where: any = {}
   if (!includeInactive) where.activa = true
-  if (plantelId) where.plantelId = plantelId
+  if (plantelIdFilter) where.plantelId = plantelIdFilter
 
   const sections = await db.section.findMany({
     where,
@@ -111,21 +127,36 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/admin/sections — create section
+// - admin: plantelId must be their own plantelId
+// - super_admin: can create in any plantel
 export async function POST(request: NextRequest) {
   const user = getUserFromRequest(request)
-  if (!user || user.rol !== 'admin') {
+  if (!user || (user.rol !== 'admin' && user.rol !== 'super_admin')) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
 
+  const isSuperAdmin = user.rol === 'super_admin'
+
   try {
     const body = await request.json()
-    const { nombre, grado, turno, plantelId, tutorId } = body
+    let { nombre, grado, turno, plantelId, tutorId } = body
 
     if (!nombre || !grado || !turno || !plantelId) {
       return NextResponse.json(
         { error: 'Faltan campos requeridos (nombre, grado, turno, plantelId)' },
         { status: 400 }
       )
+    }
+
+    // Para admin: forzar plantelId al suyo
+    if (!isSuperAdmin) {
+      const userPlantelId = await getUserPlantelId(request)
+      if (!userPlantelId) {
+        return NextResponse.json({ error: 'No tienes plantel asignado' }, { status: 403 })
+      }
+      if (plantelId !== userPlantelId) {
+        return NextResponse.json({ error: 'No puedes crear secciones en otro plantel' }, { status: 403 })
+      }
     }
 
     if (isD1()) {

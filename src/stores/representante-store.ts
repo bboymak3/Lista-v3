@@ -28,6 +28,7 @@ export interface Child {
   genero: string | null
   parentesco: string
   esPrincipal: boolean
+  fotoKey: string | null
   section: ChildSection
 }
 

@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useViewStore } from '@/stores/view-store'
 import { useRepresentanteStore } from '@/stores/representante-store'
 import { ChildSelector } from './child-selector'
+import { RepresentanteStudentPhoto } from './representante-student-photo'
 import {
   ESTADO_LABELS,
   estadoStyle,
@@ -364,6 +365,14 @@ export function RepresentanteDashboard() {
               </Button>
             </div>
           </div>
+
+          {/* Foto del alumno */}
+          <RepresentanteStudentPhoto
+            estudianteId={selectedChild.id}
+            fotoKey={selectedChild.fotoKey}
+            nombre={selectedChild.nombre}
+            apellido={selectedChild.apellido}
+          />
 
           {/* Notifications badge */}
           <Card className="cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => setActiveView('representante-notifications')}>

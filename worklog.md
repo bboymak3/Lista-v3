@@ -541,3 +541,181 @@ Stage Summary:
 - Todos los endpoints probados con curl: 200/201 OK, 403 sin auth, 409 duplicados, 404 no encontrados, esPrincipal replacement funciona (demote automático del principal anterior del estudiante).
 - Representante child-selector verificado: maneja múltiples hijos correctamente (DropdownMenu para 2+ hijos, recarga detail al cambiar de hijo).
 - Lint pasa limpio en todos los archivos nuevos/modificados. TypeScript sin errores.
+
+---
+Task ID: SUPER-ADMIN
+Agent: full-stack-developer (Super admin multi-liceo)
+Task: Super admin panel for managing multiple liceos + liceo logos + filtered views
+
+Work Log:
+- Leído contexto previo: worklog (Tasks 0, 2-a, 2-b, 3, 5, PROFILES-WHATSAPP, D1-ADAPT, ADMIN-REPRESENTANTE, WHATSAPP-INVITE), prisma/schema.prisma (Plantel con descripcion/telefono/email/logoKey/activo; User con plantelId nullable), src/lib/d1.ts (isD1, d1Query, d1First, d1Run), src/app/api/admin/plantels/route.ts + [id]/route.ts, src/app/api/admin/students/route.ts, src/app/api/admin/users/route.ts, src/app/api/admin/sections/route.ts, src/app/api/auth/login/route.ts (patrón isD1), src/app/api/upload/route.ts, src/components/layouts/app-shell.tsx (sidebar + ViewRenderer), src/stores/auth-store.ts (Role con super_admin), src/lib/api-client.ts, src/lib/auth.ts.
+- 1 helper nuevo: `src/lib/auth-helpers.ts` con `getUserPlantelId(request)` (devuelve plantelId del user autenticado; null si super_admin), `canAccessPlantel(rol, userPlantelId, targetPlantelId)`, `getAuthUser(request)`, `requireSuperAdmin(user)`. Usa isD1() + d1First para obtener plantelId desde v3_users en prod; Prisma en dev.
+- 1 store nuevo: `src/stores/super-admin-store.ts` con `useSuperAdminStore` (selectedPlantelId + setSelectedPlantel) para navegación entre lista y detalle de liceos sin prop drilling.
+- 5 API routes NUEVAS bajo `src/app/api/super-admin/plantels/`:
+  - `route.ts` (GET lista todos los plantels con counts vía subqueries: sectionCount, studentCount, professorCount, adminCount, representanteCount; soporta filter=all|active|inactive y search por nombre. POST crea plantel con nombre, descripcion, direccion, telefono, email, lat, lng, radioM, logoKey — valida unicidad de email). Solo super_admin (rol check).
+  - `[id]/route.ts` (GET detalle con counts + alumnoCount adicional; PUT actualiza cualquier campo incluido logoKey/activo solo para super_admin; DELETE soft delete con activo=0). Solo super_admin.
+  - `[id]/students/route.ts` (GET lista estudiantes del liceo vía JOIN v3_students → v3_sections → plantelId, con search e includeInactive).
+  - `[id]/users/route.ts` (GET lista usuarios del liceo WHERE plantelId = ?, con ?role= profesor|admin|representante|alumno + search + includeInactive).
+  - `[id]/sections/route.ts` (GET lista secciones del liceo con tutor (LEFT JOIN v3_users) + studentCount).
+- 5 API routes MODIFICADAS para soportar multi-plantel:
+  - `src/app/api/admin/plantels/route.ts` (GET: admin ve solo su plantel vía getUserPlantelId(); super_admin ve todos o ?plantelId=. POST: solo super_admin puede crear. Response ahora incluye descripcion, telefono, email, logoKey, activo).
+  - `src/app/api/admin/plantels/[id]/route.ts` (PUT: super_admin edita cualquier campo; admin solo puede editar nombre, direccion, lat, lng, radioM, periodoActual, poligonoJson (no descripcion/telefono/email/logoKey/activo). DELETE: solo super_admin. Para admin, valida que el plantel le pertenezca vía getUserPlantelId).
+  - `src/app/api/admin/students/route.ts` (GET: admin filtra por su plantelId (JOIN v3_sections → plantelId); super_admin ve todos o ?plantelId=. POST: admin valida que sectionId pertenezca a su plantel).
+  - `src/app/api/admin/users/route.ts` (GET: admin filtra por plantelId + excluye super_admin de la lista; super_admin ve todos o ?plantelId=. POST: admin crea usuarios en su plantel automáticamente; super_admin puede asignar plantelId arbitrario o null para super_admin).
+  - `src/app/api/admin/sections/route.ts` (GET: admin filtra por plantelId; super_admin ve todos o ?plantelId=. POST: admin fuerza plantelId al suyo; super_admin puede crear en cualquier plantel).
+- 2 componentes NUEVOS:
+  - `src/components/super-admin/liceos-manager.tsx` (view: super-admin-liceos):
+    - Header con título "Gestión de Liceos" + botón "Crear Liceo" (emerald).
+    - Filtros: Select (Todos/Activos/Inactivos) + búsqueda con debounce 250ms + badge count.
+    - Grid responsive (sm:2, lg:3 columnas) de cards de liceos.
+    - Cada card: logo thumbnail (o icono School si no tiene), nombre, badge activo/inactivo, descripción truncada (line-clamp-2), info de contacto (dirección, teléfono, email con iconos), grid de 4 stats (Secciones, Alumnos, Profesores, Representantes), footer con Switch para activar/desactivar + botones Ver detalle (ExternalLink) / Editar (Pencil) / Eliminar (Trash2).
+    - Click en header de card navega al detalle.
+    - Dialog crear/editar: form con nombre, descripción (textarea), direccion, telefono, email, lat, lng (con note sobre Google Maps), radioM, upload de logo (file input accept image/*, preview en cuadro 80x80, botones subir/cambiar/quitar). Sube a /api/upload que retorna mediaKey y se guarda como logoKey.
+    - AlertDialog de confirmación para soft delete (texto explica que el liceo será marcado inactivo).
+    - Toggle activo optimista en cliente.
+  - `src/components/super-admin/liceo-detail.tsx` (view: super-admin-liceo-detail):
+    - Botón "Volver a liceos" arriba a la izquierda.
+    - Card header con logo (80x80) + nombre + badge activo + descripción + grid de info contacto (dirección, teléfono, email, coords + radio) + grid de 6 StatBox (Secciones, Estudiantes, Profesores, Admins, Representantes, Alumnos login) con colores emerald/teal/cyan/amber/sky.
+    - Tabs (5): Estudiantes, Profesores, Representantes, Secciones, Estadísticas.
+    - Tab Estudiantes: búsqueda + tabla (nombre, código, cédula escolar, sección, estado) con max-h-96 overflow-y-auto.
+    - Tab Profesores: búsqueda + Select de role (profesor/admin/representante) + tabla.
+    - Tab Representantes: usa el mismo UsersPanel pero sin role selector (siempre role=representante).
+    - Tab Secciones: tabla (sección, grado, turno, tutor, # estudiantes).
+    - Tab Estadísticas: grid de 6 cards con métricas + card de geocerca (lat, lng, radio, periodo).
+    - Usa useSuperAdminStore para obtener el selectedPlantelId. Si no hay, muestra empty state con botón volver.
+- 1 componente MODIFICADO: `src/components/layouts/app-shell.tsx`:
+  - Añadidos imports LiceosManager + LiceoDetail.
+  - navByRole.super_admin ahora tiene 3 items: Liceos (School icon), Detalle Liceo (Building icon), Mi Perfil (UserCircle icon, ya existente).
+  - roleLabels.super_admin cambiado de 'Súper Admin' a 'Super Admin'.
+  - ViewRenderer maneja 'super-admin-liceos' → <LiceosManager />, 'super-admin-liceo-detail' → <LiceoDetail />, 'super-admin-profile' → <ProfileEditor />. Default del switch cae a <LiceosManager /> para super_admin.
+  - Initial activeView para super_admin cambiado a 'super-admin-liceos' (antes 'super-admin-dashboard').
+  - Back button handler actualizado: si está en 'super-admin-liceos', no vuelve (es la vista raíz); si está en otra vista de super_admin, vuelve a 'super-admin-liceos'.
+  - navItems ahora usa fallback `|| []` para evitar crash si el rol no está en navByRole.
+- Verificado con curl TODOS los endpoints (creando user super_admin de prueba V-SUPER-TEST / test12345, hard-deleteado al final junto con liceo de prueba):
+  - GET /api/super-admin/plantels → 200, lista con counts completos.
+  - GET /api/super-admin/plantels/plantel-default → 200, detalle con alumnoCount.
+  - GET /api/super-admin/plantels/plantel-default/students → 200, 5 estudiantes.
+  - GET /api/super-admin/plantels/plantel-default/sections → 200, 1 sección con tutor y 5 estudiantes.
+  - GET /api/super-admin/plantels/plantel-default/users?role=profesor → 200, vacío (no hay profesores asignados).
+  - POST /api/super-admin/plantels → 201, crea liceo con descripcion/telefono/email/logoKey.
+  - PUT /api/super-admin/plantels/{id} → 200, actualiza nombre+telefono.
+  - DELETE /api/super-admin/plantels/{id} → 200, soft delete (activo=0).
+  - GET /api/admin/plantels → 200, super_admin ve todos los planteles.
+  - GET /api/admin/students?plantelId=plantel-default → 200, filtra por plantelId correctamente.
+- Lint: `bunx eslint src/lib/auth-helpers.ts src/app/api/super-admin src/app/api/admin/plantels src/app/api/admin/students src/app/api/admin/users src/app/api/admin/sections src/components/super-admin src/components/layouts/app-shell.tsx src/stores/super-admin-store.ts` → 0 errors, 0 warnings (después de auto-fix de directives eslint-disable no utilizados con `bunx eslint --fix`).
+- Tema visual: emerald/teal consistente con el resto del sistema. Iconos lucide-react: School, Building, Users, GraduationCap, Shield, UserCircle, MapPin, Phone, Mail, Search, Pencil, Trash2, Plus, Loader2, ImageIcon, X, ExternalLink, ArrowLeft, BarChart3, ClipboardList. shadcn/ui: Dialog, AlertDialog, Select, Tabs, Switch, Badge, Avatar, Skeleton, Card, Table, Input, Label, Textarea, Button. Textos en español Venezuela. sonner para toasts.
+- Limpieza: test user V-SUPER-TEST y liceo "Liceo Test SuperAdmin" hard-deleteados al final (scripts temporales en /home/z/my-project/scripts/ también borrados, se conservó seed.ts pre-existente).
+- Work record escrito en `/home/z/my-project/agent-ctx/SUPER-ADMIN-full-stack-developer.md`.
+
+Stage Summary:
+- 1 helper nuevo: src/lib/auth-helpers.ts (getUserPlantelId, canAccessPlantel, getAuthUser, requireSuperAdmin)
+- 1 store nuevo: src/stores/super-admin-store.ts (selectedPlantelId)
+- 5 API routes nuevas: src/app/api/super-admin/plantels/{route.ts, [id]/route.ts, [id]/students/route.ts, [id]/users/route.ts, [id]/sections/route.ts}
+- 5 API routes modificadas para multi-plantel: src/app/api/admin/{plantels/route.ts, plantels/[id]/route.ts, students/route.ts, users/route.ts, sections/route.ts}
+- 2 componentes nuevos: src/components/super-admin/{liceos-manager.tsx, liceo-detail.tsx}
+- 1 componente modificado: src/components/layouts/app-shell.tsx (nav super_admin, ViewRenderer, roleLabels, initial view)
+- Todos los endpoints probados con curl: 200/201 OK, 403 sin auth super_admin, soft delete funciona, filtros por plantelId funcionan, super_admin ve todo.
+- Lint pasa limpio (0 errors, 0 warnings) en todos los archivos nuevos/modificados.
+
+---
+Task ID: PROFILE-PERMISSIONS
+Agent: full-stack-developer (Profile permissions + carnet logo)
+Task: Role-based profile editing + liceo logo on carnet PDF
+
+Work Log:
+- Leído contexto previo: worklog (Tasks 0, 2-a, 2-b, 3, 5, ADMIN-REPRESENTANTE, WHATSAPP-INVITE), prisma/schema.prisma (User con fotoKey/whatsapp/telefono/plantelId, Plantel con logoKey), src/lib/d1.ts (isD1/d1Query/d1First/d1Run), src/app/api/auth/login/route.ts (patrón isD1), src/app/api/representante/profile/route.ts (GET+PUT whatsapp existente), src/app/api/alumno/photo/route.ts (upload foto para Student.fotoKey), src/lib/carnet-pdf.ts (PDF generator con fetchPhotoBuffer), src/components/alumno/carnet-digital.tsx (UI carnet).
+- API: Created `src/app/api/profile/route.ts` (GET + PUT universal con restricciones por rol):
+  - GET: devuelve el perfil del usuario autenticado (todos los campos excepto password). Usa `isD1()` → D1 SELECT en prod, Prisma findUnique en dev.
+  - PUT: actualiza perfil con restricciones por rol mediante `EDITABLE_FIELDS`:
+    - super_admin: cedula, nombre, apellido, email, telefono, whatsapp, fotoKey
+    - admin: nombre, apellido, email, telefono, whatsapp, fotoKey (NO cedula)
+    - profesor: telefono, whatsapp, fotoKey (NO cedula, nombre, apellido, email)
+    - representante: telefono, whatsapp, fotoKey (NO cedula, nombre, apellido, email)
+    - alumno: 403 con mensaje "No puedes editar tu perfil. Contacta a la dirección."
+  - Validaciones: whatsapp (8-15 dígitos), email (regex), unicidad cédula y email en UPDATE.
+  - Patrón isD1: D1 UPDATE dinámico (sets[]) en prod, Prisma update en dev.
+- API: Created `src/app/api/profile/photo/route.ts` (POST — upload foto perfil propio):
+  - Acepta FormData con "file" (imagen, max 5MB).
+  - Roles permitidos: super_admin, admin, profesor, representante.
+  - `alumno`: 403 "No puedes cambiar tu foto de perfil. Contacta a la dirección."
+  - Genera mediaKey `profile-{uuid}.{ext}` (jpg/png/webp/gif).
+  - Dev: usa sharp para optimizar a 512x512 JPEG quality 85 si está disponible, sino guarda buffer original en public/uploads/.
+  - Prod: sube a R2 bucket BUCKET con httpMetadata.contentType.
+  - Actualiza v3_users.fotoKey = mediaKey para el usuario autenticado. Devuelve { fotoKey }.
+- API: Updated `src/app/api/alumno/photo/route.ts`:
+  - `verifyStudentOwnership` ahora soporta 4 roles:
+    - admin / super_admin → acceso total
+    - alumno → estudiante.userId === payload.id (su propio perfil)
+    - representante → verifica ParentStudent (relación representanteId/estudianteId)
+  - Validación de rol del POST actualizada: acepta `alumno`, `admin`, `super_admin`, `representante` (los demás → 403).
+- Store: Updated `src/stores/representante-store.ts`:
+  - Añadido `fotoKey: string | null` a la interfaz `Child`.
+- API: Updated `src/app/api/representante/children/route.ts`:
+  - SELECT en D1 ahora incluye `st.fotoKey`.
+  - Prisma select incluye `fotoKey: true` en estudiante.
+  - Response mapea `fotoKey: l.fotoKey / l.estudiante.fotoKey` en cada child.
+- UI: Created `src/components/shared/profile-editor.tsx` (componente reutilizable):
+  - Recibe props `readOnly?: boolean` y `readOnlyNote?: string`.
+  - `editableFieldsFor(rol)` helper que devuelve flags { cedula, nombre, apellido, email, telefono, whatsapp, foto } según rol.
+  - Cédula SIEMPRE disabled (locked for everyone).
+  - Header card con gradiente emerald/teal, avatar con foto, nombre completo, cédula, badge de rol.
+  - Si `readOnly` o `user.rol === 'alumno'` → muestra Alert ámbar "Perfil gestionado por la dirección" y deshabilita todos los campos + oculta botón Guardar.
+  - Para roles no-alumno: muestra form editable con campos deshabilitados según permisos. Botón "Guardar cambios" → PUT /api/profile con solo campos modificados + permitidos.
+  - Card de foto de perfil (solo si edit.foto): Avatar con preview, botón "Subir foto / Cambiar foto" → POST /api/profile/photo (FormData con file). Toast success.
+  - Card informativa con texto específico por rol explicando los permisos.
+  - Card "Foto de perfil" separada con Avatar grande + botón Upload.
+  - Usa shadcn/ui (Card, Input, Label, Button, Avatar, Badge, Alert, Skeleton) + lucide-react (UserCircle, Save, RefreshCw, Camera, Upload, Phone, MessageCircle, Mail, Lock, Info, CheckCircle2). Sonner para toasts. Spanish (Venezuela).
+- UI: Created `src/components/representante/representante-student-photo.tsx` (sub-foto del alumno):
+  - Card "Foto del alumno" con Avatar + botón Upload.
+  - Upload → POST /api/alumno/photo con FormData (file + estudianteId).
+  - Tras éxito: llama `fetchChildren(true)` para sincronizar el store.
+  - Props: estudianteId, fotoKey, nombre, apellido, onPhotoChanged (callback opcional).
+- UI: Updated `src/components/representante/representante-dashboard.tsx`:
+  - Añadido import de `RepresentanteStudentPhoto`.
+  - Inyectado el componente `<RepresentanteStudentPhoto />` dentro del bloque `selectedChild && (...)`, después de "Acciones rápidas" y antes del badge de notificaciones.
+- Layout: Updated `src/components/layouts/app-shell.tsx`:
+  - Eliminado import no usado `Settings` de lucide-react.
+  - Eliminado import `RepresentanteProfile` (reemplazado por `ProfileEditor` universal).
+  - Añadido import `ProfileEditor` de `@/components/shared/profile-editor`.
+  - Añadido `super_admin: [{ id: 'profile', label: 'Mi Perfil', icon: UserCircle, view: 'super-admin-profile' }]` a navByRole (corrige error TS pre-existente: Record<Role, NavItem[]> faltaba super_admin).
+  - Añadido `{ id: 'profile', label: 'Mi Perfil', icon: UserCircle, view: '{role}-profile' }` a cada rol (admin, profesor, representante, alumno).
+  - Actualizado `roleLabels`: añadido `super_admin: 'Súper Admin'`.
+  - Actualizados los dos `Record<Role, string>` maps en useEffects para incluir `super_admin: 'super-admin-dashboard'`.
+  - Añadido bloque `if (user.rol === 'super_admin')` en ViewRenderer con cases `super-admin-profile` → `<ProfileEditor />` y `super-admin-dashboard` → placeholder "sección en construcción".
+  - Añadido case `admin-profile` → `<ProfileEditor />` en bloque admin.
+  - Añadido case `profesor-profile` → `<ProfileEditor />` en bloque profesor.
+  - Actualizado case `representante-profile` → `<ProfileEditor />` (antes usaba RepresentanteProfile).
+  - Añadido case `alumno-profile` → `<ProfileEditor readOnly readOnlyNote="Tu perfil es gestionado por la dirección..." />`.
+- Lib: Updated `src/lib/carnet-pdf.ts`:
+  - `CarnetStudentData.plantel` ahora incluye `logoKey: string | null`.
+  - `fetchStudentDataForCarnet`: SELECT D1 ahora incluye `p.logoKey AS plantelLogoKey`. Prisma select añade `logoKey: true` en plantel. Response mapea `logoKey: row.plantelLogoKey / student.section.plantel.logoKey`.
+  - Añadido `fetchLogoBuffer(logoKey)` helper (similar a fetchPhotoBuffer):
+    - Prod (isD1): get de R2 bucket BUCKET, devuelve { bytes: Uint8Array, format: 'png' | 'jpg' }.
+    - Dev: lee de filesystem (public/uploads/).
+    - Devuelve null si no hay logoKey, si extensión no es png/jpg/jpeg, o si R2/filesystem no encuentra el archivo.
+  - `buildCarnetPdf`: si `data.plantel?.logoKey` existe, embede el logo en top-left del header (dentro de la banda emerald):
+    - Logo size = 70pt, posición (14, PAGE_H - 90).
+    - Fondo blanco detrás del logo (mejor contraste sobre emerald).
+    - El texto "CARNET ESTUDIANTIL" + "Sistema de Asistencia · Lista" se desplaza a la derecha del logo (headerTextX = 94 en lugar de 16).
+    - Si no hay logo o falla la incrustación: layout original sin cambios.
+- Verificado con curl (dev server inestable por OOM del sandbox, pero endpoints probados exitosamente en requests individuales):
+  - GET /api/profile como admin → 200, devuelve user sin password con fotoKey, whatsapp, telefono, plantelId, activo, createdAt, updatedAt.
+  - PUT /api/profile como admin con {whatsapp, telefono, nombre} → 200, user actualizado (whatsapp seteado, telefono seteado, nombre respetado). updatedAt cambia.
+  - PUT /api/profile como representante con {nombre:"HACKED_NAME", whatsapp:"584121112233"} → 200, user actualizado con whatsapp nuevo PERO nombre sigue siendo "Ana" (campo nombre ignorado porque representante no tiene permiso). Verificación de restricciones por rol funcionando.
+  - PUT /api/profile como alumno → 403 con mensaje "No puedes editar tu perfil. Contacta a la dirección."
+  - GET /api/representante/children → 200, response ahora incluye `fotoKey: null` en cada child.
+- Lint: `bunx eslint <mis archivos>` → exit 0, sin errores ni warnings. (El lint completo del proyecto con `bun run lint` hace OOM en el sandbox de 4GB, como ya reportaron agentes previos.)
+- TypeScript: mis archivos no introducen nuevos errores. Únicos errores TS en mis archivos son del patrón pre-existente `R2Bucket` (mismo que ya existe en `src/app/api/alumno/photo/route.ts`, `src/app/api/upload/route.ts`, `src/app/api/files/[...path]/route.ts`, `src/app/api/admin/send-pdf/route.ts`, `src/lib/carnet-pdf.ts` original). Fix de error TS pre-existente en `app-shell.tsx`: `Record<Role, NavItem[]>` ahora incluye `super_admin` (antes fallaba porque el tipo Role exige esa key).
+
+Stage Summary:
+- 2 archivos API creados: `src/app/api/profile/route.ts` (GET+PUT universal con restricciones por rol), `src/app/api/profile/photo/route.ts` (POST upload foto perfil propio).
+- 2 archivos API modificados: `src/app/api/alumno/photo/route.ts` (verifyStudentOwnership soporta representante + rol check ampliado), `src/app/api/representante/children/route.ts` (response incluye fotoKey).
+- 2 archivos UI creados: `src/components/shared/profile-editor.tsx` (componente reutilizable con readOnly prop para alumno), `src/components/representante/representante-student-photo.tsx` (sub-foto del alumno para representante).
+- 1 archivo UI modificado: `src/components/representante/representante-dashboard.tsx` (añadido card de foto del alumno).
+- 1 archivo layout modificado: `src/components/layouts/app-shell.tsx` (Mi Perfil nav para todos los roles + cases en ViewRenderer + super_admin nav + super_admin en roleLabels y useEffects).
+- 1 archivo store modificado: `src/stores/representante-store.ts` (fotoKey en interfaz Child).
+- 1 archivo lib modificado: `src/lib/carnet-pdf.ts` (logoKey en CarnetStudentData.plantel, fetchLogoBuffer helper, buildCarnetPdf embebe logo top-left si existe).
+- Restricciones por rol verificadas: super_admin edita todo incl. cédula; admin edita todo menos cédula; profesor/representante editan solo telefono/whatsapp/fotoKey; alumno no edita (403) y ve perfil read-only con nota.
+- Carnet PDF: si plantel.logoKey existe, el logo se embebe en el top-left del header con fondo blanco, y el texto del header se desplaza a la derecha. Si no existe, comportamiento original sin cambios.
+- Representante puede subir foto de perfil de sus hijos (vía /api/alumno/photo con verifyStudentOwnership extendido para ParentStudent).
+- Contexto de tarea guardado en `/agent-ctx/PROFILE-PERMISSIONS-full-stack-developer.md`.

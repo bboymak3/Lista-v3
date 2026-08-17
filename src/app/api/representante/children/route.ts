@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
       genero: string | null
       parentesco: string
       esPrincipal: number
+      fotoKey: string | null
       sectionId: string
       sectionNombre: string
       sectionGrado: string
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
       plantelRadioM: number
     }>(
       `SELECT ps.id, ps.parentesco, ps.esPrincipal,
-              st.id AS id, st.codigoUnico, st.nombre, st.apellido, st.genero, st.sectionId,
+              st.id AS id, st.codigoUnico, st.nombre, st.apellido, st.genero, st.fotoKey, st.sectionId,
               sec.id AS sectionId, sec.nombre AS sectionNombre, sec.grado AS sectionGrado, sec.turno AS sectionTurno,
               p.id AS plantelId, p.nombre AS plantelNombre, p.direccion AS plantelDireccion, p.lat AS plantelLat, p.lng AS plantelLng, p.radioM AS plantelRadioM
        FROM v3_parent_student ps
@@ -58,6 +59,7 @@ export async function GET(request: NextRequest) {
       genero: l.genero,
       parentesco: l.parentesco,
       esPrincipal: l.esPrincipal === 1,
+      fotoKey: l.fotoKey,
       section: {
         id: l.sectionId,
         nombre: l.sectionNombre,
@@ -102,6 +104,7 @@ export async function GET(request: NextRequest) {
     genero: l.estudiante.genero,
     parentesco: l.parentesco,
     esPrincipal: l.esPrincipal,
+    fotoKey: l.estudiante.fotoKey,
     section: {
       id: l.estudiante.section.id,
       nombre: l.estudiante.section.nombre,

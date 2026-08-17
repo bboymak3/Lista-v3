@@ -3,21 +3,38 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isD1, d1Query, d1First, d1Run } from '@/lib/d1'
 import { db } from '@/lib/db'
 import { getUserFromRequest } from '@/lib/auth'
+import { getUserPlantelId } from '@/lib/auth-helpers'
 import { v4 as uuidv4 } from 'uuid'
 
 // GET /api/admin/students — list students (with pagination + filters)
+// - admin: filter by their plantelId (JOIN sections → plantelId)
+// - super_admin: see all, or filter by ?plantelId=
 export async function GET(request: NextRequest) {
   const user = getUserFromRequest(request)
-  if (!user || user.rol !== 'admin') {
+  if (!user || (user.rol !== 'admin' && user.rol !== 'super_admin')) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
 
+  const isSuperAdmin = user.rol === 'super_admin'
   const { searchParams } = new URL(request.url)
   const page = parseInt(searchParams.get('page') || '1', 10)
   const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 200)
   const sectionId = searchParams.get('sectionId') || undefined
   const search = searchParams.get('search') || undefined
   const includeInactive = searchParams.get('includeInactive') === 'true'
+
+  // Determine the plantelId filter:
+  // - super_admin: optional ?plantelId=
+  // - admin: their plantelId from DB (mandatory)
+  let plantelIdFilter: string | null = null
+  if (isSuperAdmin) {
+    plantelIdFilter = searchParams.get('plantelId') || null
+  } else {
+    plantelIdFilter = await getUserPlantelId(request)
+    if (!plantelIdFilter) {
+      return NextResponse.json({ data: [], total: 0, page, limit, totalPages: 0 })
+    }
+  }
 
   if (isD1()) {
     // Producción: SQL crudo contra v3_students, JOIN sections y parents
@@ -30,20 +47,22 @@ export async function GET(request: NextRequest) {
       where.push('s.sectionId = ?')
       params.push(sectionId)
     }
-    let searchWhere = ''
+    if (plantelIdFilter) {
+      where.push('sec.plantelId = ?')
+      params.push(plantelIdFilter)
+    }
     if (search) {
       where.push(
         '(s.nombre LIKE ? OR s.apellido LIKE ? OR s.codigoUnico LIKE ? OR s.cedulaEscolar LIKE ?)'
       )
       const like = `%${search}%`
       params.push(like, like, like, like)
-      searchWhere = ''
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
     // Total count
     const totalRow = await d1First<{ count: number }>(
-      `SELECT COUNT(*) as count FROM v3_students s ${whereSql}`,
+      `SELECT COUNT(*) as count FROM v3_students s LEFT JOIN v3_sections sec ON sec.id = s.sectionId ${whereSql}`,
       params
     )
     const total = totalRow?.count || 0
@@ -160,6 +179,7 @@ export async function GET(request: NextRequest) {
   const where: any = {}
   if (!includeInactive) where.activo = true
   if (sectionId) where.sectionId = sectionId
+  if (plantelIdFilter) where.section = { plantelId: plantelIdFilter }
   if (search) {
     where.OR = [
       { nombre: { contains: search } },
@@ -173,7 +193,7 @@ export async function GET(request: NextRequest) {
     db.student.findMany({
       where,
       include: {
-        section: { select: { id: true, nombre: true, grado: true, turno: true } },
+        section: { select: { id: true, nombre: true, grado: true, turno: true, plantelId: true } },
         parents: {
           include: {
             representante: {
@@ -199,11 +219,15 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/admin/students — create a student
+// - admin: sectionId must belong to their plantelId
+// - super_admin: any sectionId
 export async function POST(request: NextRequest) {
   const user = getUserFromRequest(request)
-  if (!user || user.rol !== 'admin') {
+  if (!user || (user.rol !== 'admin' && user.rol !== 'super_admin')) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
   }
+
+  const isSuperAdmin = user.rol === 'super_admin'
 
   try {
     const body = await request.json()
@@ -216,15 +240,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Para admin: validar que la sectionId pertenece a su plantel
+    let userPlantelId: string | null = null
+    if (!isSuperAdmin) {
+      userPlantelId = await getUserPlantelId(request)
+      if (!userPlantelId) {
+        return NextResponse.json({ error: 'No tienes plantel asignado' }, { status: 403 })
+      }
+    }
+
     if (isD1()) {
-      // Producción: D1
-      // Verificar que la sección existe
-      const section = await d1First<{ id: string }>(
-        'SELECT id FROM v3_sections WHERE id = ? LIMIT 1',
+      // Verificar que la sección existe y pertenece al plantel del admin
+      const section = await d1First<{ id: string; plantelId: string }>(
+        'SELECT id, plantelId FROM v3_sections WHERE id = ? LIMIT 1',
         [sectionId]
       )
       if (!section) {
         return NextResponse.json({ error: 'Sección no encontrada' }, { status: 404 })
+      }
+      if (!isSuperAdmin && section.plantelId !== userPlantelId) {
+        return NextResponse.json({ error: 'La sección no pertenece a tu plantel' }, { status: 403 })
       }
 
       // Verificar unicidad de codigoUnico
@@ -321,10 +356,15 @@ export async function POST(request: NextRequest) {
     }
 
     // Desarrollo: Prisma
-    // Verificar que la sección existe
-    const section = await db.section.findUnique({ where: { id: sectionId } })
+    const section = await db.section.findUnique({
+      where: { id: sectionId },
+      select: { id: true, plantelId: true },
+    })
     if (!section) {
       return NextResponse.json({ error: 'Sección no encontrada' }, { status: 404 })
+    }
+    if (!isSuperAdmin && section.plantelId !== userPlantelId) {
+      return NextResponse.json({ error: 'La sección no pertenece a tu plantel' }, { status: 403 })
     }
 
     // Verificar unicidad de codigoUnico

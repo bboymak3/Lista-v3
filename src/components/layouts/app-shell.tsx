@@ -37,14 +37,18 @@ import {
   Menu,
   QrCode,
   Newspaper,
-  Settings,
   UserCircle,
   FileText,
   ClipboardList,
+  Building,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { ThemeToggle } from '@/components/theme-toggle'
+
+// Super Admin views
+import { LiceosManager } from '@/components/super-admin/liceos-manager'
+import { LiceoDetail } from '@/components/super-admin/liceo-detail'
 
 // Profesor views (lazy loaded inline)
 import { ProfesorDashboard } from '@/components/profesor/profesor-dashboard'
@@ -68,8 +72,8 @@ import { ChildLocationMap } from '@/components/representante/child-location-map'
 import { ChildAttendance } from '@/components/representante/child-attendance'
 import { RepresentanteFeed } from '@/components/representante/representante-feed'
 import { RepresentanteNotifications } from '@/components/representante/representante-notifications'
-import { RepresentanteProfile } from '@/components/representante/representante-profile'
 import { RepresentanteJustifications } from '@/components/representante/representante-justifications'
+import { ProfileEditor } from '@/components/shared/profile-editor'
 
 // Alumno views
 import { AlumnoDashboard } from '@/components/alumno/alumno-dashboard'
@@ -85,6 +89,11 @@ type NavItem = {
 }
 
 const navByRole: Record<Role, NavItem[]> = {
+  super_admin: [
+    { id: 'liceos', label: 'Liceos', icon: School, view: 'super-admin-liceos' },
+    { id: 'liceo-detail', label: 'Detalle Liceo', icon: Building, view: 'super-admin-liceo-detail' },
+    { id: 'profile', label: 'Mi Perfil', icon: UserCircle, view: 'super-admin-profile' },
+  ],
   admin: [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, view: 'admin-dashboard' },
     { id: 'students', label: 'Estudiantes', icon: GraduationCap, view: 'admin-students' },
@@ -93,7 +102,8 @@ const navByRole: Record<Role, NavItem[]> = {
     { id: 'plantel', label: 'Geocerca', icon: MapPin, view: 'admin-plantel' },
     { id: 'send-pdf', label: 'Enviar PDF', icon: FileText, view: 'admin-send-pdf' },
     { id: 'representante-students', label: 'Asignar Representantes', icon: Users, view: 'admin-representante-students' },
-    { id: 'users', label: 'Usuarios', icon: UserCircle, view: 'admin-users' },
+    { id: 'users', label: 'Usuarios', icon: Users, view: 'admin-users' },
+    { id: 'profile', label: 'Mi Perfil', icon: UserCircle, view: 'admin-profile' },
   ],
   profesor: [
     { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, view: 'profesor-dashboard' },
@@ -101,6 +111,7 @@ const navByRole: Record<Role, NavItem[]> = {
     { id: 'checkin', label: 'Mi Check-in', icon: MapPin, view: 'profesor-checkin' },
     { id: 'feed', label: 'Publicar', icon: Camera, view: 'profesor-feed' },
     { id: 'notifications', label: 'Avisos', icon: Bell, view: 'profesor-notifications' },
+    { id: 'profile', label: 'Mi Perfil', icon: UserCircle, view: 'profesor-profile' },
   ],
   representante: [
     { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, view: 'representante-dashboard' },
@@ -109,17 +120,19 @@ const navByRole: Record<Role, NavItem[]> = {
     { id: 'justifications', label: 'Justificaciones', icon: ClipboardList, view: 'representante-justifications' },
     { id: 'feed', label: 'Noticias', icon: Newspaper, view: 'representante-feed' },
     { id: 'notifications', label: 'Avisos', icon: Bell, view: 'representante-notifications' },
-    { id: 'profile', label: 'Mi Perfil', icon: Settings, view: 'representante-profile' },
+    { id: 'profile', label: 'Mi Perfil', icon: UserCircle, view: 'representante-profile' },
   ],
   alumno: [
     { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, view: 'alumno-dashboard' },
     { id: 'carnet', label: 'Carnet', icon: QrCode, view: 'alumno-carnet' },
     { id: 'checkin', label: 'Check-in', icon: MapPin, view: 'alumno-checkin' },
     { id: 'feed', label: 'Noticias', icon: Newspaper, view: 'alumno-feed' },
+    { id: 'profile', label: 'Mi Perfil', icon: UserCircle, view: 'alumno-profile' },
   ],
 }
 
 const roleLabels: Record<Role, string> = {
+  super_admin: 'Super Admin',
   admin: 'Dirección',
   profesor: 'Profesor',
   representante: 'Representante',
@@ -228,9 +241,10 @@ export function AppShell() {
     const handlePopState = (e: PopStateEvent) => {
       // Prevenir el comportamiento por defecto de salir de la app
       e.preventDefault()
-      if (activeView !== 'dashboard' && !activeView.endsWith('-dashboard')) {
+      if (activeView !== 'dashboard' && !activeView.endsWith('-dashboard') && activeView !== 'super-admin-liceos') {
         // Volver al dashboard en vez de salir
         const initial: Record<Role, string> = {
+          super_admin: 'super-admin-liceos',
           admin: 'admin-dashboard',
           profesor: 'profesor-dashboard',
           representante: 'representante-dashboard',
@@ -257,6 +271,7 @@ export function AppShell() {
     if (!user) return
     if (activeView === 'dashboard') {
       const initial: Record<Role, string> = {
+        super_admin: 'super-admin-liceos',
         admin: 'admin-dashboard',
         profesor: 'profesor-dashboard',
         representante: 'representante-dashboard',
@@ -268,7 +283,7 @@ export function AppShell() {
 
   if (!user) return null
 
-  const navItems = navByRole[user.rol]
+  const navItems = navByRole[user.rol] || []
   const activeItem = navItems.find((i) => i.view === activeView) || navItems[0]
 
   const handleLogout = () => {
@@ -392,6 +407,21 @@ function ViewRenderer({ view }: { view: string }) {
   const user = useAuthStore((s) => s.user)
   if (!user) return null
 
+  // === SUPER_ADMIN VIEWS ===
+  if (user.rol === 'super_admin') {
+    switch (view) {
+      case 'super-admin-liceos':
+        return <LiceosManager />
+      case 'super-admin-liceo-detail':
+        return <LiceoDetail />
+      case 'super-admin-profile':
+        return <ProfileEditor />
+      case 'super-admin-dashboard':
+      default:
+        return <LiceosManager />
+    }
+  }
+
   // === ADMIN VIEWS ===
   if (user.rol === 'admin') {
     switch (view) {
@@ -411,6 +441,8 @@ function ViewRenderer({ view }: { view: string }) {
         return <RepresentanteStudents />
       case 'admin-users':
         return <UsersManager />
+      case 'admin-profile':
+        return <ProfileEditor />
       default:
         return <AdminDashboard />
     }
@@ -429,6 +461,8 @@ function ViewRenderer({ view }: { view: string }) {
         return <FeedPoster />
       case 'profesor-notifications':
         return <ProfesorNotifications />
+      case 'profesor-profile':
+        return <ProfileEditor />
       default:
         return <ProfesorDashboard />
     }
@@ -450,7 +484,7 @@ function ViewRenderer({ view }: { view: string }) {
       case 'representante-justifications':
         return <RepresentanteJustifications />
       case 'representante-profile':
-        return <RepresentanteProfile />
+        return <ProfileEditor />
       default:
         return <RepresentanteDashboard />
     }
@@ -467,6 +501,13 @@ function ViewRenderer({ view }: { view: string }) {
         return <AlumnoCheckin />
       case 'alumno-feed':
         return <AlumnoFeed />
+      case 'alumno-profile':
+        return (
+          <ProfileEditor
+            readOnly
+            readOnlyNote="Tu perfil es gestionado por la dirección del plantel. Si necesitas actualizar tus datos personales, comunícate con la dirección."
+          />
+        )
       default:
         return <AlumnoDashboard />
     }

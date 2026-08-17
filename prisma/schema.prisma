@@ -21,15 +21,17 @@ model User {
   apellido   String
   email      String?  @unique
   password   String   // bcrypt hash
-  rol        String   // admin | profesor | representante | alumno
+  rol        String   // super_admin | admin | profesor | representante | alumno
   telefono   String?
   whatsapp   String?  // número de WhatsApp (formato internacional sin +)
   fotoKey    String?  // R2 object key
+  plantelId  String?  // liceo al que pertenece (null para super_admin que ve todos)
   activo     Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   // Relations
+  plantel                Plantel?             @relation("UserPlantel", fields: [plantelId], references: [id])
   studentProfile         Student?             @relation("StudentUser")
   tutorSections          Section[]            @relation("SectionTutor")
   sectionAssignments     SectionAssignment[]
@@ -43,6 +45,7 @@ model User {
   invitations            InvitationToken[]
 
   @@index([rol, activo])
+  @@index([plantelId])
   @@map("v3_users")
 }
 
@@ -68,18 +71,25 @@ model InvitationToken {
 // ============================================
 
 model Plantel {
-  id            String  @id @default(cuid())
+  id            String   @id @default(cuid())
   nombre        String
+  descripcion   String?  // descripción del liceo (gestionada por super_admin)
   direccion     String?
+  telefono      String?
+  email         String?
   lat           Float
   lng           Float
-  radioM        Int     @default(150)
-  poligonoJson  String? // GeoJSON polygon string (geocerca compleja opcional)
-  periodoActual String  @default("2024-2025")
+  radioM        Int      @default(150)
+  poligonoJson  String?  // GeoJSON polygon string (geocerca compleja opcional)
+  logoKey       String?  // logo del liceo para carnets (R2 object key)
+  periodoActual String   @default("2024-2025")
+  activo        Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  sections Section[]
+  // Relations
+  sections    Section[]
+  users       User[]     @relation("UserPlantel")
 
   @@index([nombre])
   @@map("v3_plantels")
